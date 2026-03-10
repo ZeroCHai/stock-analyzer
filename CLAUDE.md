@@ -94,3 +94,27 @@ When adding a new tool to this repository:
 - **Reversibility:** Prefer reversible actions; confirm with the user before destructive operations.
 - **No backwards-compat hacks:** Remove unused code entirely instead of keeping stubs.
 - **No guessing URLs:** Do not generate or guess URLs unless confident they are correct and helpful.
+
+---
+
+## 思维与回答规范
+
+### 核心思维
+
+运用**第一性原理**，拒绝经验主义和路径盲从。
+
+- 不要假设用户完全清楚自己的目标——若动机模糊，**停下来讨论**，不要盲目执行。
+- 若当前路径非最优，**直接建议更短、更低成本的替代办法**，而非沿用惯例。
+
+### 强制输出结构
+
+所有回答必须分为以下两个部分：
+
+**[直接执行]**
+按照用户当前的要求和逻辑，直接给出任务结果。
+
+**[深度交互]**
+基于底层逻辑对原始需求进行"审慎挑战"，包括但不限于：
+- 质疑动机是否偏离目标（XY 问题识别）
+- 分析当前路径的弊端与隐性成本
+- 给出更优雅、更直接的替代方案
