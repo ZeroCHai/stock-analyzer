@@ -6,7 +6,7 @@ This file provides context, conventions, and workflows for AI assistants (Claude
 
 **Repository:** ZeroCHai/Tools
 **Purpose:** A collection of tools and utilities.
-**Current state:** Newly initialized — no source files yet.
+**Current tools:** `stock_analyzer` — US stock fundamental analysis + AI-powered research (Claude API + Streamlit)
 
 ---
 
@@ -14,11 +14,54 @@ This file provides context, conventions, and workflows for AI assistants (Claude
 
 ```
 Tools/
-├── CLAUDE.md          # This file — AI assistant guide
-└── (tools to be added)
+├── CLAUDE.md                          # This file — AI assistant guide
+├── requirements.txt                   # Python dependencies
+├── .env.example                       # Environment variable template
+└── stock_analyzer/
+    ├── config.py                      # API keys, DB path, model config
+    ├── data/
+    │   ├── db.py                      # SQLite persistence (stocks + financials)
+    │   └── ingestion/
+    │       ├── yfinance_client.py     # Yahoo Finance fetcher + cache
+    │       └── local.py              # PLACEHOLDER — local file ingestion (format TBD)
+    ├── analysis/
+    │   ├── fundamental.py             # Metric extraction, health scoring
+    │   ├── screener.py               # Multi-criteria stock screener
+    │   └── ai.py                     # Claude API integration (streaming reports)
+    └── ui/
+        └── app.py                    # Streamlit 4-page web UI
 ```
 
-As tools are added, this structure should be updated to reflect the layout (e.g., directories per tool, shared libraries, test directories).
+### stock_analyzer — Quick Start
+
+```bash
+# 1. Install dependencies
+pip install -r requirements.txt
+
+# 2. Set your Anthropic API key
+cp .env.example .env
+# edit .env → ANTHROPIC_API_KEY=sk-ant-...
+
+# 3. Launch
+streamlit run stock_analyzer/ui/app.py
+```
+
+### stock_analyzer — Key Design Decisions
+
+| Decision | Choice | Rationale |
+|---|---|---|
+| Market | US stocks only (Yahoo Finance) | A股/美股 data schemas differ significantly |
+| AI approach | LLM interpretation (Path A) | Fundamental analysis is definitional judgment, not prediction |
+| UI framework | Streamlit | Python-native, zero frontend code |
+| Database | SQLite | Local-first, no infra needed |
+| Model | `claude-opus-4-6` with adaptive thinking | Best reasoning for financial analysis |
+| Data cache | SQLite via `yfinance` `.info` dict | Avoids repeated API calls |
+
+### stock_analyzer — Pending Work
+
+- `data/ingestion/local.py` — implement once local file format is confirmed (likely CSV/Excel)
+- Add tests for `fundamental.py` metric calculations
+- Add sector comparison benchmarks
 
 ---
 
