@@ -57,9 +57,38 @@ streamlit run stock_analyzer/ui/app.py
 | Model | `claude-opus-4-6` with adaptive thinking | Best reasoning for financial analysis |
 | Data cache | SQLite via `yfinance` `.info` dict | Avoids repeated API calls |
 
+### stock_analyzer — Local File Ingestion
+
+`data/ingestion/local.py` supports three source formats (auto-detected):
+
+| Format | Detection signal | Notes |
+|---|---|---|
+| **Standard CSV** | Column names match schema below | Primary format |
+| **Bloomberg export** | Columns like `BS_TOT_ASSET`, `SALES_REV_TURN` | BDH/BCDE terminal exports |
+| **Wind export** | Chinese field names or `WIND CODE` column | 中英文导出均支持 |
+
+**Standard CSV required columns:**
+```
+symbol, period (YYYY-MM-DD), revenue, net_income, total_assets, total_equity
+```
+
+**Optional columns** (used to compute ratios):
+```
+gross_profit, operating_income, total_debt, free_cashflow,
+eps, shares_outstanding, current_assets, current_liabilities,
+dividends_paid, current_price
+```
+
+**Usage:**
+```python
+from stock_analyzer.data.ingestion.local import load_local_data
+
+info = load_local_data("data.csv", symbol="AAPL")   # single symbol
+all  = load_local_data("watchlist.csv")              # all symbols → {sym: dict}
+```
+
 ### stock_analyzer — Pending Work
 
-- `data/ingestion/local.py` — implement once local file format is confirmed (likely CSV/Excel)
 - Add tests for `fundamental.py` metric calculations
 - Add sector comparison benchmarks
 
