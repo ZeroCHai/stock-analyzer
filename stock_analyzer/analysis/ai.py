@@ -1,20 +1,19 @@
 """
-AI-powered fundamental analysis using Claude (claude-opus-4-6).
-Uses streaming + adaptive thinking for rich, reasoned reports.
+AI-powered fundamental analysis using Seed2.0 via ByteDance Ark (OpenAI-compatible API).
 """
 
 from __future__ import annotations
-import anthropic
-from stock_analyzer.config import ANTHROPIC_API_KEY, MODEL
+from openai import OpenAI
+from stock_analyzer.config import ARK_API_KEY, ARK_BASE_URL, MODEL
 from stock_analyzer.analysis.fundamental import extract_metrics, METRIC_LABELS
 
 _client = None
 
 
-def _get_client() -> anthropic.Anthropic:
+def _get_client() -> OpenAI:
     global _client
     if _client is None:
-        _client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        _client = OpenAI(api_key=ARK_API_KEY, base_url=ARK_BASE_URL)
     return _client
 
 
@@ -62,31 +61,30 @@ Respond in structured Markdown with clear sections."""
 
 def analyze_stock_stream(info: dict):
     """
-    Generator that yields text chunks from Claude's streaming response.
-    Usage:
-        for chunk in analyze_stock_stream(info):
-            print(chunk, end="", flush=True)
+    Generator that yields text chunks from Seed2.0's streaming response.
     """
     client = _get_client()
     prompt = _format_metrics(info)
 
-    with client.messages.stream(
+    stream = client.chat.completions.create(
         model=MODEL,
         max_tokens=4096,
-        thinking={"type": "adaptive"},
-        system=SYSTEM_PROMPT,
+        stream=True,
         messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
             {
                 "role": "user",
                 "content": (
                     "Please provide a comprehensive fundamental analysis "
                     "of the following stock:\n\n" + prompt
                 ),
-            }
+            },
         ],
-    ) as stream:
-        for text in stream.text_stream:
-            yield text
+    )
+    for chunk in stream:
+        content = chunk.choices[0].delta.content
+        if content:
+            yield content
 
 
 def compare_stocks_stream(infos: list[dict]):
@@ -102,12 +100,12 @@ def compare_stocks_stream(infos: list[dict]):
 
     combined = "\n\n" + ("=" * 60 + "\n").join(blocks)
 
-    with client.messages.stream(
+    stream = client.chat.completions.create(
         model=MODEL,
         max_tokens=4096,
-        thinking={"type": "adaptive"},
-        system=SYSTEM_PROMPT,
+        stream=True,
         messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
             {
                 "role": "user",
                 "content": (
@@ -115,8 +113,10 @@ def compare_stocks_stream(infos: list[dict]):
                     "Which offers the best risk/reward and why?\n\n"
                     + combined
                 ),
-            }
+            },
         ],
-    ) as stream:
-        for text in stream.text_stream:
-            yield text
+    )
+    for chunk in stream:
+        content = chunk.choices[0].delta.content
+        if content:
+            yield content
