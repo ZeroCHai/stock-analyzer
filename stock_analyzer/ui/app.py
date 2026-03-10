@@ -13,8 +13,9 @@ import plotly.express as px
 
 from stock_analyzer.data.db import init_db
 from stock_analyzer.data.ingestion.yfinance_client import (
-    fetch_stock, fetch_price_history
+    fetch_stock, fetch_price_history, set_demo_mode, is_demo_mode
 )
+from stock_analyzer.data.ingestion.demo_data import DEMO_STOCKS
 from stock_analyzer.analysis.fundamental import (
     extract_metrics, score_health, METRIC_LABELS
 )
@@ -24,6 +25,19 @@ from stock_analyzer.analysis.ai import analyze_stock_stream, compare_stocks_stre
 # ── Init ──────────────────────────────────────────────────────────────────────
 init_db()
 st.set_page_config(page_title="Stock Analyzer", page_icon="📈", layout="wide")
+
+# ── Demo mode toggle (sidebar) ────────────────────────────────────────────────
+st.sidebar.divider()
+demo = st.sidebar.toggle(
+    "Demo Mode (no network)",
+    value=is_demo_mode(),
+    help="Use built-in sample data (AAPL, MSFT, NVDA, GOOGL, JPM). "
+         "Disable to fetch live data from Yahoo Finance.",
+)
+set_demo_mode(demo)
+if demo:
+    st.sidebar.caption(f"Demo symbols: {', '.join(sorted(DEMO_STOCKS))}")
+st.sidebar.divider()
 
 # ── Sidebar navigation ────────────────────────────────────────────────────────
 page = st.sidebar.radio(
