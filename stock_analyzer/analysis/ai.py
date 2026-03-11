@@ -264,28 +264,40 @@ def analyze_stock_news_stream(symbol: str, company_name: str, sector: str, news_
             yield content
 
 
-def analyze_industry_stream(sector: str, industry: str, company_name: str, news_items: list):
+def analyze_industry_stream(
+    sector: str,
+    industry: str,
+    company_name: str,
+    news_items: list,
+    peers: list | None = None,
+):
     """
     Stream AI analysis of sector/industry news and competitive dynamics.
+
+    peers: list of ticker symbols whose news was aggregated (for context).
     """
     if not news_items:
         return
     client = _get_client()
     from datetime import datetime
 
+    peers_str = ", ".join(peers) if peers else "sector peers"
     lines = [
         f"Sector: {sector}",
         f"Industry: {industry}",
         f"Company of interest: {company_name}",
+        f"News sourced from peers: {peers_str}",
         "",
-        "Recent Sector/Industry News Headlines (newest first):",
+        "Recent Peer/Industry News Headlines (newest first):",
     ]
     for item in news_items:
-        title = item.get("title", "")
-        publisher = item.get("publisher", "")
-        ts = item.get("providerPublishTime", 0)
+        title    = item.get("title", "")
+        publisher= item.get("publisher", "")
+        ts       = item.get("providerPublishTime", 0)
+        tickers  = item.get("relatedTickers", [])
         date_str = datetime.fromtimestamp(ts).strftime("%Y-%m-%d") if ts else ""
-        lines.append(f"  [{date_str}] {title}  ({publisher})")
+        ticker_tag = f"[{', '.join(tickers[:4])}]" if tickers else ""
+        lines.append(f"  [{date_str}] {ticker_tag} {title}  ({publisher})")
 
     stream = client.chat.completions.create(
         model=_effective_model(),
@@ -296,7 +308,8 @@ def analyze_industry_stream(sector: str, industry: str, company_name: str, news_
             {
                 "role": "user",
                 "content": (
-                    "Based on the following recent sector/industry news headlines:\n"
+                    "The following headlines were collected from major peers in the sector "
+                    f"({peers_str}). Based on this competitive intelligence:\n"
                     "1. Identify the dominant industry themes and macro trends\n"
                     "2. Assess competitive dynamics and any shifts in market structure\n"
                     "3. Highlight major sector-wide opportunities and threats\n"

@@ -17,6 +17,7 @@ from stock_analyzer.data.ingestion.yfinance_client import (
     fetch_stock, fetch_price_history, set_demo_mode, is_demo_mode,
     fetch_income_statement, fetch_balance_sheet, fetch_cash_flow,
     fetch_news, fetch_industry_news, SECTOR_ETF,
+    fetch_sector_peers_news, SECTOR_PEERS,
 )
 from stock_analyzer.data.ingestion.demo_data import DEMO_STOCKS
 from stock_analyzer.analysis.fundamental import (
@@ -508,8 +509,7 @@ elif page == "📰 News & Industry":
         with st.spinner(f"Fetching {symbol}…"):
             try:
                 info = fetch_stock(symbol)
-                stock_news    = fetch_news(symbol)
-                industry_news = fetch_industry_news(info.get("sector", ""))
+                stock_news = fetch_news(symbol)
             except Exception as e:
                 st.error(str(e))
                 st.stop()
@@ -517,7 +517,6 @@ elif page == "📰 News & Industry":
         company_name = info.get("longName", symbol)
         sector       = info.get("sector", "N/A")
         industry     = info.get("industry", "N/A")
-        etf_symbol   = SECTOR_ETF.get(sector, "")
 
         st.subheader(company_name)
         st.caption(f"{sector} · {industry}")
@@ -545,23 +544,28 @@ elif page == "📰 News & Industry":
 
         # ── Tab 2: Industry Analysis ───────────────────────────────────────
         with tab_industry:
-            if etf_symbol:
-                st.caption(f"Sector news sourced from **{etf_symbol}** ETF · {sector}")
-            else:
-                st.caption(f"Sector: {sector} (no ETF mapping available)")
+            with st.spinner("Loading peer news…"):
+                industry_news, peers_used = fetch_sector_peers_news(sector, exclude_symbol=symbol)
+
+            default_peers = SECTOR_PEERS.get(sector, [])
+            if default_peers:
+                peer_pool = ", ".join(p for p in default_peers if p.upper() != symbol)
+                st.caption(f"**Peer pool ({sector}):** {peer_pool}")
 
             if not industry_news:
-                st.info("No industry news available (demo mode or sector not mapped).")
+                st.info("No peer news available (demo mode or sector not mapped).")
             else:
-                st.caption(f"{len(industry_news)} recent articles")
+                if peers_used:
+                    st.caption(f"Fetched from: **{', '.join(peers_used)}** · {len(industry_news)} articles")
                 for item in industry_news:
                     _render_news_item(item)
 
                 st.subheader("AI Industry Analysis")
-                st.caption("Analyzing sector trends and competitive dynamics…")
+                st.caption("Analyzing competitive dynamics across sector peers…")
                 ind_area = st.empty()
                 full_ind = ""
-                for chunk in analyze_industry_stream(sector, industry, company_name, industry_news):
+                for chunk in analyze_industry_stream(sector, industry, company_name,
+                                                      industry_news, peers=peers_used):
                     full_ind += chunk
                     ind_area.markdown(full_ind + "▌")
                 ind_area.markdown(full_ind)

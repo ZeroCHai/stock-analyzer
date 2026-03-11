@@ -118,6 +118,21 @@ SECTOR_ETF: dict[str, str] = {
     "Communication Services": "XLC",
 }
 
+# Top large-cap peers per sector for targeted competitive-intelligence news
+SECTOR_PEERS: dict[str, list[str]] = {
+    "Technology":             ["AAPL", "MSFT", "NVDA", "GOOGL", "META", "AMZN", "TSLA", "AMD", "INTC", "ORCL"],
+    "Healthcare":             ["JNJ", "UNH", "LLY", "ABBV", "MRK", "PFE", "TMO", "ABT", "DHR", "BMY"],
+    "Financials":             ["JPM", "BAC", "WFC", "GS", "MS", "BRK-B", "C", "BLK", "AXP", "USB"],
+    "Consumer Discretionary": ["AMZN", "TSLA", "HD", "MCD", "NKE", "SBUX", "TJX", "LOW", "BKNG", "TGT"],
+    "Consumer Staples":       ["WMT", "PG", "KO", "PEP", "COST", "PM", "MO", "CL", "MDLZ", "EL"],
+    "Energy":                 ["XOM", "CVX", "COP", "EOG", "SLB", "OXY", "MPC", "PSX", "VLO", "HES"],
+    "Utilities":              ["NEE", "DUK", "SO", "D", "EXC", "AEP", "XEL", "SRE", "WEC", "ED"],
+    "Basic Materials":        ["LIN", "APD", "SHW", "ECL", "NEM", "FCX", "DOW", "PPG", "NUE", "VMC"],
+    "Industrials":            ["GE", "HON", "CAT", "UPS", "DE", "LMT", "RTX", "BA", "MMM", "FDX"],
+    "Real Estate":            ["AMT", "PLD", "EQIX", "CCI", "PSA", "O", "DLR", "WELL", "SPG", "AVB"],
+    "Communication Services": ["META", "GOOGL", "NFLX", "DIS", "CMCSA", "T", "VZ", "TMUS", "CHTR", "EA"],
+}
+
 
 def fetch_news(symbol: str, max_items: int = 15) -> list:
     """Return recent news for a symbol as a list of dicts from Yahoo Finance."""
@@ -136,3 +151,47 @@ def fetch_industry_news(sector: str, max_items: int = 15) -> list:
     if not etf:
         return []
     return fetch_news(etf, max_items)
+
+
+def fetch_sector_peers_news(
+    sector: str,
+    exclude_symbol: str = "",
+    max_per_ticker: int = 5,
+    max_total: int = 20,
+) -> tuple[list, list]:
+    """
+    Aggregate recent news from the top large-cap peers in the sector.
+
+    Queries up to 5 peers (excluding the target stock itself), deduplicates
+    by title, and returns results sorted newest-first.
+
+    Returns:
+        (news_list, peers_queried) — the aggregated news and the tickers used.
+    """
+    if is_demo_mode():
+        return [], []
+
+    candidates = [p for p in SECTOR_PEERS.get(sector, [])
+                  if p.upper() != exclude_symbol.upper()]
+    peers_to_query = candidates[:5]
+
+    all_news: list = []
+    peers_queried: list = []
+
+    for ticker in peers_to_query:
+        news = fetch_news(ticker, max_items=max_per_ticker)
+        if news:
+            all_news.extend(news)
+            peers_queried.append(ticker)
+
+    # Sort newest first, then deduplicate by title
+    all_news.sort(key=lambda x: x.get("providerPublishTime", 0), reverse=True)
+    seen: set = set()
+    deduped: list = []
+    for item in all_news:
+        title = item.get("title", "")
+        if title and title not in seen:
+            seen.add(title)
+            deduped.append(item)
+
+    return deduped[:max_total], peers_queried
