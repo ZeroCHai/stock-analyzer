@@ -153,38 +153,32 @@ def fetch_industry_news(sector: str, max_items: int = 15) -> list:
     return fetch_news(etf, max_items)
 
 
-def fetch_sector_peers_news(
-    sector: str,
-    exclude_symbol: str = "",
+def fetch_peers_news_by_list(
+    tickers: list[str],
     max_per_ticker: int = 5,
     max_total: int = 20,
 ) -> tuple[list, list]:
     """
-    Aggregate recent news from the top large-cap peers in the sector.
-
-    Queries up to 5 peers (excluding the target stock itself), deduplicates
-    by title, and returns results sorted newest-first.
+    Fetch and aggregate news for an explicit list of ticker symbols.
 
     Returns:
-        (news_list, peers_queried) — the aggregated news and the tickers used.
+        (news_list, tickers_that_returned_news) sorted newest-first, deduplicated.
     """
     if is_demo_mode():
         return [], []
 
-    candidates = [p for p in SECTOR_PEERS.get(sector, [])
-                  if p.upper() != exclude_symbol.upper()]
-    peers_to_query = candidates[:5]
-
     all_news: list = []
-    peers_queried: list = []
+    queried: list = []
 
-    for ticker in peers_to_query:
-        news = fetch_news(ticker, max_items=max_per_ticker)
+    for ticker in tickers:
+        t = ticker.strip().upper()
+        if not t:
+            continue
+        news = fetch_news(t, max_items=max_per_ticker)
         if news:
             all_news.extend(news)
-            peers_queried.append(ticker)
+            queried.append(t)
 
-    # Sort newest first, then deduplicate by title
     all_news.sort(key=lambda x: x.get("providerPublishTime", 0), reverse=True)
     seen: set = set()
     deduped: list = []
@@ -194,4 +188,19 @@ def fetch_sector_peers_news(
             seen.add(title)
             deduped.append(item)
 
-    return deduped[:max_total], peers_queried
+    return deduped[:max_total], queried
+
+
+def fetch_sector_peers_news(
+    sector: str,
+    exclude_symbol: str = "",
+    max_per_ticker: int = 5,
+    max_total: int = 20,
+) -> tuple[list, list]:
+    """
+    Auto-detect the top-5 large-cap peers for the sector and fetch their news.
+    Delegates to fetch_peers_news_by_list().
+    """
+    candidates = [p for p in SECTOR_PEERS.get(sector, [])
+                  if p.upper() != exclude_symbol.upper()]
+    return fetch_peers_news_by_list(candidates[:5], max_per_ticker, max_total)

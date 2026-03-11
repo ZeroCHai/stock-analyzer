@@ -17,7 +17,7 @@ from stock_analyzer.data.ingestion.yfinance_client import (
     fetch_stock, fetch_price_history, set_demo_mode, is_demo_mode,
     fetch_income_statement, fetch_balance_sheet, fetch_cash_flow,
     fetch_news, fetch_industry_news, SECTOR_ETF,
-    fetch_sector_peers_news, SECTOR_PEERS,
+    fetch_sector_peers_news, fetch_peers_news_by_list, SECTOR_PEERS,
 )
 from stock_analyzer.data.ingestion.demo_data import DEMO_STOCKS
 from stock_analyzer.analysis.fundamental import (
@@ -505,6 +505,12 @@ elif page == "📰 News & Industry":
 
     symbol = st.text_input("Ticker symbol", key="news_ticker").strip().upper()
 
+    custom_peers_raw = st.text_input(
+        "Custom peers for industry analysis (optional, comma-separated)",
+        placeholder="e.g. AAPL, MSFT, GOOGL — leave empty to auto-detect top 5 sector peers",
+        key="news_custom_peers",
+    )
+
     if symbol and st.button("Load News", type="primary"):
         with st.spinner(f"Fetching {symbol}…"):
             try:
@@ -544,13 +550,18 @@ elif page == "📰 News & Industry":
 
         # ── Tab 2: Industry Analysis ───────────────────────────────────────
         with tab_industry:
-            with st.spinner("Loading peer news…"):
-                industry_news, peers_used = fetch_sector_peers_news(sector, exclude_symbol=symbol)
+            custom_peers = [p.strip().upper() for p in custom_peers_raw.split(",") if p.strip()]
 
-            default_peers = SECTOR_PEERS.get(sector, [])
-            if default_peers:
-                peer_pool = ", ".join(p for p in default_peers if p.upper() != symbol)
-                st.caption(f"**Peer pool ({sector}):** {peer_pool}")
+            with st.spinner("Loading peer news…"):
+                if custom_peers:
+                    industry_news, peers_used = fetch_peers_news_by_list(custom_peers)
+                    st.caption(f"Using custom peers: **{', '.join(custom_peers)}**")
+                else:
+                    industry_news, peers_used = fetch_sector_peers_news(sector, exclude_symbol=symbol)
+                    default_peers = SECTOR_PEERS.get(sector, [])
+                    if default_peers:
+                        peer_pool = ", ".join(p for p in default_peers if p.upper() != symbol)
+                        st.caption(f"**Auto-detected peer pool ({sector}):** {peer_pool}")
 
             if not industry_news:
                 st.info("No peer news available (demo mode or sector not mapped).")
