@@ -8,7 +8,7 @@ import os
 import yfinance as yf
 import pandas as pd
 from stock_analyzer.data.db import upsert_stock, upsert_financials, get_financials
-from stock_analyzer.data.ingestion.demo_data import DEMO_STOCKS, get_demo_history
+from stock_analyzer.data.ingestion.demo_data import DEMO_STOCKS, DEMO_NEWS, get_demo_history
 
 # Force demo mode via env var, or auto-detect on network failure
 _DEMO_MODE: bool | None = None
@@ -172,7 +172,7 @@ def _normalize_news_item(item: dict) -> dict:
 def fetch_news(symbol: str, max_items: int = 15) -> list:
     """Return recent news for a symbol as a list of dicts from Yahoo Finance."""
     if is_demo_mode():
-        return []
+        return DEMO_NEWS.get(symbol.upper(), [])[:max_items]
     try:
         raw = yf.Ticker(symbol.upper()).news or []
         return [_normalize_news_item(item) for item in raw[:max_items]]
@@ -199,9 +199,6 @@ def fetch_peers_news_by_list(
     Returns:
         (news_list, tickers_that_returned_news) sorted newest-first, deduplicated.
     """
-    if is_demo_mode():
-        return [], []
-
     all_news: list = []
     queried: list = []
 

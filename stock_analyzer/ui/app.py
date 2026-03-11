@@ -81,6 +81,50 @@ def _bar_chart(data: dict, title: str, pct: bool = False, billions: bool = False
 init_db()
 st.set_page_config(page_title="Stock Analyzer", page_icon="📈", layout="wide")
 
+# ── Robinhood-style CSS ────────────────────────────────────────────────────────
+st.markdown("""
+<style>
+/* ── Buttons ── */
+.stButton > button {
+    background-color: #00C805;
+    color: #000000;
+    font-weight: 700;
+    border: none;
+    border-radius: 24px;
+    padding: 0.5rem 1.8rem;
+    transition: background-color 0.15s ease;
+}
+.stButton > button:hover { background-color: #00A804; color: #000000; }
+.stButton > button:active { background-color: #008F03; color: #000000; }
+
+/* ── Metric labels ── */
+[data-testid="stMetricLabel"] { font-size: 0.75rem; color: #888888; letter-spacing: 0.04em; }
+[data-testid="stMetricValue"] { font-size: 1.35rem; font-weight: 700; }
+
+/* ── Dividers ── */
+hr { border-color: #2A2A32 !important; margin: 0.6rem 0; }
+
+/* ── Tabs ── */
+[data-testid="stTabs"] [data-baseweb="tab"] {
+    font-weight: 600;
+    font-size: 0.85rem;
+    letter-spacing: 0.03em;
+}
+
+/* ── DataFrame ── */
+[data-testid="stDataFrame"] { border-radius: 8px; }
+
+/* ── Sidebar nav ── */
+[data-testid="stSidebar"] .stRadio label { font-size: 0.88rem; font-weight: 500; }
+
+/* ── Input fields ── */
+[data-testid="stTextInput"] input { border-radius: 8px; }
+
+/* ── Expander ── */
+[data-testid="stExpander"] summary { font-weight: 600; }
+</style>
+""", unsafe_allow_html=True)
+
 # ── Demo mode toggle (sidebar) ────────────────────────────────────────────────
 st.sidebar.divider()
 demo = st.sidebar.toggle(
@@ -98,7 +142,7 @@ st.sidebar.divider()
 page = st.sidebar.radio(
     "Navigation",
     ["📊 Stock Overview", "🔍 Screener", "🤖 AI Analysis", "📑 Financial Analysis",
-     "📰 News & Industry", "⚖️ Compare"],
+     "📰 Stock News", "🏭 Industry", "⚖️ Compare"],
 )
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -497,19 +541,13 @@ elif page == "📑 Financial Analysis":
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# PAGE 5 — News & Industry Analysis
+# PAGE 5 — Stock News
 # ─────────────────────────────────────────────────────────────────────────────
-elif page == "📰 News & Industry":
-    st.title("📰 News & Industry Analysis")
-    st.caption("Recent news for a single stock and AI-powered sector analysis.")
+elif page == "📰 Stock News":
+    st.title("📰 Stock News")
+    st.caption("Recent headlines for a single stock with AI-powered sentiment analysis.")
 
     symbol = st.text_input("Ticker symbol", key="news_ticker").strip().upper()
-
-    custom_peers_raw = st.text_input(
-        "Custom peers for industry analysis (optional, comma-separated)",
-        placeholder="e.g. AAPL, MSFT, GOOGL — leave empty to auto-detect top 5 sector peers",
-        key="news_custom_peers",
-    )
 
     if symbol and st.button("Load News", type="primary"):
         with st.spinner(f"Fetching {symbol}…"):
@@ -528,62 +566,88 @@ elif page == "📰 News & Industry":
         st.caption(f"{sector} · {industry}")
         st.divider()
 
-        tab_stock, tab_industry = st.tabs(["📰 Stock News", "🏭 Industry Analysis"])
+        if not stock_news:
+            st.info("No recent news available. Disable Demo Mode to fetch live headlines.")
+        else:
+            st.caption(f"{len(stock_news)} recent articles")
+            for item in stock_news:
+                _render_news_item(item)
 
-        # ── Tab 1: Stock News ──────────────────────────────────────────────
-        with tab_stock:
-            if not stock_news:
-                st.info("No recent news available (demo mode or data unavailable).")
-            else:
-                st.caption(f"{len(stock_news)} recent articles")
-                for item in stock_news:
-                    _render_news_item(item)
-
-                st.subheader("AI News Analysis")
-                st.caption("Summarizing key themes and stock impact…")
-                news_area = st.empty()
-                full_news = ""
-                for chunk in analyze_stock_news_stream(symbol, company_name, sector, stock_news):
-                    full_news += chunk
-                    news_area.markdown(full_news + "▌")
-                news_area.markdown(full_news)
-
-        # ── Tab 2: Industry Analysis ───────────────────────────────────────
-        with tab_industry:
-            custom_peers = [p.strip().upper() for p in custom_peers_raw.split(",") if p.strip()]
-
-            with st.spinner("Loading peer news…"):
-                if custom_peers:
-                    industry_news, peers_used = fetch_peers_news_by_list(custom_peers)
-                    st.caption(f"Using custom peers: **{', '.join(custom_peers)}**")
-                else:
-                    industry_news, peers_used = fetch_sector_peers_news(sector, exclude_symbol=symbol)
-                    default_peers = SECTOR_PEERS.get(sector, [])
-                    if default_peers:
-                        peer_pool = ", ".join(p for p in default_peers if p.upper() != symbol)
-                        st.caption(f"**Auto-detected peer pool ({sector}):** {peer_pool}")
-
-            if not industry_news:
-                st.info("No peer news available (demo mode or sector not mapped).")
-            else:
-                if peers_used:
-                    st.caption(f"Fetched from: **{', '.join(peers_used)}** · {len(industry_news)} articles")
-                for item in industry_news:
-                    _render_news_item(item)
-
-                st.subheader("AI Industry Analysis")
-                st.caption("Analyzing competitive dynamics across sector peers…")
-                ind_area = st.empty()
-                full_ind = ""
-                for chunk in analyze_industry_stream(sector, industry, company_name,
-                                                      industry_news, peers=peers_used):
-                    full_ind += chunk
-                    ind_area.markdown(full_ind + "▌")
-                ind_area.markdown(full_ind)
+            st.subheader("AI News Analysis")
+            st.caption("Summarizing key themes and stock impact…")
+            news_area = st.empty()
+            full_news = ""
+            for chunk in analyze_stock_news_stream(symbol, company_name, sector, stock_news):
+                full_news += chunk
+                news_area.markdown(full_news + "▌")
+            news_area.markdown(full_news)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# PAGE 6 — Compare
+# PAGE 6 — Industry Analysis
+# ─────────────────────────────────────────────────────────────────────────────
+elif page == "🏭 Industry":
+    st.title("🏭 Industry Analysis")
+    st.caption("Competitive intelligence from sector peers with AI-powered macro analysis.")
+
+    symbol = st.text_input("Focus ticker (your stock)", key="ind_ticker").strip().upper()
+
+    custom_peers_raw = st.text_input(
+        "Custom peers (optional, comma-separated)",
+        placeholder="e.g. MSFT, GOOGL, AMZN — leave empty to auto-detect top 5 sector peers",
+        key="ind_custom_peers",
+    )
+
+    if symbol and st.button("Load Industry News", type="primary"):
+        with st.spinner(f"Fetching {symbol}…"):
+            try:
+                info = fetch_stock(symbol)
+            except Exception as e:
+                st.error(str(e))
+                st.stop()
+
+        company_name = info.get("longName", symbol)
+        sector       = info.get("sector", "N/A")
+        industry     = info.get("industry", "N/A")
+
+        st.subheader(company_name)
+        st.caption(f"{sector} · {industry}")
+        st.divider()
+
+        custom_peers = [p.strip().upper() for p in custom_peers_raw.split(",") if p.strip()]
+
+        with st.spinner("Loading peer news…"):
+            if custom_peers:
+                industry_news, peers_used = fetch_peers_news_by_list(custom_peers)
+                st.caption(f"Using custom peers: **{', '.join(custom_peers)}**")
+            else:
+                industry_news, peers_used = fetch_sector_peers_news(sector, exclude_symbol=symbol)
+                default_peers = SECTOR_PEERS.get(sector, [])
+                if default_peers:
+                    peer_pool = ", ".join(p for p in default_peers if p.upper() != symbol)
+                    st.caption(f"**Auto peer pool ({sector}):** {peer_pool}")
+
+        if not industry_news:
+            st.info("No peer news available. Disable Demo Mode or enter custom peer tickers.")
+        else:
+            if peers_used:
+                st.caption(f"Sources: **{', '.join(peers_used)}** · {len(industry_news)} articles")
+            for item in industry_news:
+                _render_news_item(item)
+
+            st.subheader("AI Industry Analysis")
+            st.caption("Analyzing competitive dynamics across sector peers…")
+            ind_area = st.empty()
+            full_ind = ""
+            for chunk in analyze_industry_stream(sector, industry, company_name,
+                                                  industry_news, peers=peers_used):
+                full_ind += chunk
+                ind_area.markdown(full_ind + "▌")
+            ind_area.markdown(full_ind)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PAGE 7 — Compare
 # ─────────────────────────────────────────────────────────────────────────────
 elif page == "⚖️ Compare":
     st.title("⚖️ Compare Stocks")
