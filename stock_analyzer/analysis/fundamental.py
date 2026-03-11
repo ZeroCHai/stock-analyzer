@@ -4,6 +4,7 @@ All values are returned as floats; None means data unavailable.
 """
 
 from __future__ import annotations
+import pandas as pd
 
 
 def extract_metrics(info: dict) -> dict:
@@ -81,6 +82,118 @@ def score_health(metrics: dict) -> dict[str, str]:
     flag("gross_margin",     good=0.30, bad=0.10)
 
     return flags
+
+
+def extract_historical_metrics(income_stmt, balance_sheet, cash_flow) -> dict:
+    """
+    Extract key financial metrics for up to 3 fiscal years.
+    Input DataFrames are from yfinance (rows=metrics, columns=fiscal year dates).
+    Returns {metric_key: {year_str: float}}.
+    """
+    def safe_row(df, *candidates):
+        if df is None or df.empty:
+            return None
+        for key in candidates:
+            if key in df.index:
+                return df.loc[key]
+        return None
+
+    def to_year(col) -> str:
+        try:
+            return str(col.year)
+        except AttributeError:
+            return str(col)[:4]
+
+    def series_to_dict(series, cols) -> dict:
+        if series is None:
+            return {}
+        out = {}
+        for col in cols:
+            try:
+                v = series[col]
+                if not pd.isna(v):
+                    out[to_year(col)] = float(v)
+            except (KeyError, TypeError):
+                pass
+        return out
+
+    def margin_dict(num, den, cols) -> dict:
+        out = {}
+        if num is None or den is None:
+            return out
+        for col in cols:
+            try:
+                n, d = num[col], den[col]
+                if not pd.isna(n) and not pd.isna(d) and d != 0:
+                    out[to_year(col)] = float(n) / float(d)
+            except (KeyError, TypeError):
+                pass
+        return out
+
+    inc_cols = list(income_stmt.columns[:3]) if (income_stmt is not None and not income_stmt.empty) else []
+    bs_cols  = list(balance_sheet.columns[:3]) if (balance_sheet is not None and not balance_sheet.empty) else []
+    cf_cols  = list(cash_flow.columns[:3]) if (cash_flow is not None and not cash_flow.empty) else []
+
+    result = {}
+
+    # ── Income Statement ──────────────────────────────────────────────────────
+    revenue    = safe_row(income_stmt, "Total Revenue")
+    gross_p    = safe_row(income_stmt, "Gross Profit")
+    op_income  = safe_row(income_stmt, "Operating Income", "EBIT")
+    net_income = safe_row(income_stmt, "Net Income")
+    ebitda     = safe_row(income_stmt, "EBITDA", "Normalized EBITDA")
+    eps        = safe_row(income_stmt, "Diluted EPS", "Basic EPS")
+
+    result["revenue"]           = series_to_dict(revenue, inc_cols)
+    result["gross_profit"]      = series_to_dict(gross_p, inc_cols)
+    result["operating_income"]  = series_to_dict(op_income, inc_cols)
+    result["net_income"]        = series_to_dict(net_income, inc_cols)
+    result["ebitda"]            = series_to_dict(ebitda, inc_cols)
+    result["eps_hist"]          = series_to_dict(eps, inc_cols)
+
+    result["gross_margin_hist"]     = margin_dict(gross_p, revenue, inc_cols)
+    result["operating_margin_hist"] = margin_dict(op_income, revenue, inc_cols)
+    result["net_margin_hist"]       = margin_dict(net_income, revenue, inc_cols)
+
+    # ── Balance Sheet ─────────────────────────────────────────────────────────
+    total_assets = safe_row(balance_sheet, "Total Assets")
+    total_equity = safe_row(balance_sheet, "Stockholders Equity", "Common Stock Equity")
+    total_debt   = safe_row(balance_sheet, "Total Debt")
+
+    result["total_assets"] = series_to_dict(total_assets, bs_cols)
+    result["total_equity"] = series_to_dict(total_equity, bs_cols)
+    result["total_debt"]   = series_to_dict(total_debt, bs_cols)
+
+    # ── ROE (cross-statement, match by year string) ───────────────────────────
+    roe = {}
+    for yr in set(result["net_income"]) & set(result["total_equity"]):
+        e = result["total_equity"][yr]
+        if e != 0:
+            roe[yr] = result["net_income"][yr] / e
+    result["roe_hist"] = roe
+
+    # ── Cash Flow ─────────────────────────────────────────────────────────────
+    op_cf = safe_row(cash_flow, "Operating Cash Flow")
+    capex = safe_row(cash_flow, "Capital Expenditure")
+    fcf   = safe_row(cash_flow, "Free Cash Flow")
+
+    result["operating_cashflow"] = series_to_dict(op_cf, cf_cols)
+    result["capex"]              = series_to_dict(capex, cf_cols)
+    result["free_cashflow_hist"] = series_to_dict(fcf, cf_cols)
+
+    # Derive FCF if not directly available
+    if not result["free_cashflow_hist"] and op_cf is not None and capex is not None:
+        fcf_calc = {}
+        for col in cf_cols:
+            try:
+                o, c = op_cf[col], capex[col]
+                if not pd.isna(o) and not pd.isna(c):
+                    fcf_calc[to_year(col)] = float(o) + float(c)  # capex is negative
+            except (KeyError, TypeError):
+                pass
+        result["free_cashflow_hist"] = fcf_calc
+
+    return result
 
 
 METRIC_LABELS = {

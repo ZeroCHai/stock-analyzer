@@ -87,6 +87,76 @@ def analyze_stock_stream(info: dict):
             yield content
 
 
+def analyze_financials_stream(symbol: str, company_name: str, sector: str, hist: dict):
+    """
+    Stream AI analysis of 3-year financial trends.
+    hist: output of extract_historical_metrics()
+    """
+    client = _get_client()
+
+    def B(v): return f"${v/1e9:.2f}B"
+    def P(v): return f"{v:.1%}"
+    def D(v): return f"${v:.2f}"
+
+    lines = [
+        f"Company: {company_name} ({symbol})",
+        f"Sector: {sector}",
+        "",
+        "3-Year Financial Data (oldest → newest):",
+    ]
+
+    metric_defs = [
+        ("revenue",              "Revenue",             B),
+        ("gross_profit",         "Gross Profit",        B),
+        ("gross_margin_hist",    "Gross Margin",        P),
+        ("operating_income",     "Operating Income",    B),
+        ("operating_margin_hist","Operating Margin",    P),
+        ("net_income",           "Net Income",          B),
+        ("net_margin_hist",      "Net Margin",          P),
+        ("ebitda",               "EBITDA",              B),
+        ("eps_hist",             "EPS (Diluted)",       D),
+        ("total_assets",         "Total Assets",        B),
+        ("total_debt",           "Total Debt",          B),
+        ("total_equity",         "Total Equity",        B),
+        ("roe_hist",             "Return on Equity",    P),
+        ("operating_cashflow",   "Operating Cash Flow", B),
+        ("free_cashflow_hist",   "Free Cash Flow",      B),
+    ]
+
+    for key, label, fmt in metric_defs:
+        data = hist.get(key, {})
+        if data:
+            years = sorted(data.keys())
+            values = " → ".join(f"{y}: {fmt(data[y])}" for y in years)
+            lines.append(f"  {label}: {values}")
+
+    prompt = "\n".join(lines)
+
+    stream = client.chat.completions.create(
+        model=MODEL,
+        max_tokens=4096,
+        stream=True,
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {
+                "role": "user",
+                "content": (
+                    "Analyze the 3-year financial trends below. For each key area:\n"
+                    "1. Describe the trend (improving / declining / stable)\n"
+                    "2. Identify the likely drivers behind significant changes\n"
+                    "3. Highlight any red flags or notable strengths\n"
+                    "4. Provide an overall assessment of financial health trajectory\n\n"
+                    + prompt
+                ),
+            },
+        ],
+    )
+    for chunk in stream:
+        content = chunk.choices[0].delta.content
+        if content:
+            yield content
+
+
 def compare_stocks_stream(infos: list[dict]):
     """
     Compare multiple stocks and recommend the best pick.

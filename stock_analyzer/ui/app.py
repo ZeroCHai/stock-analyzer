@@ -13,14 +13,43 @@ import plotly.express as px
 
 from stock_analyzer.data.db import init_db
 from stock_analyzer.data.ingestion.yfinance_client import (
-    fetch_stock, fetch_price_history, set_demo_mode, is_demo_mode
+    fetch_stock, fetch_price_history, set_demo_mode, is_demo_mode,
+    fetch_income_statement, fetch_balance_sheet, fetch_cash_flow,
 )
 from stock_analyzer.data.ingestion.demo_data import DEMO_STOCKS
 from stock_analyzer.analysis.fundamental import (
-    extract_metrics, score_health, METRIC_LABELS
+    extract_metrics, score_health, METRIC_LABELS, extract_historical_metrics,
 )
 from stock_analyzer.analysis.screener import ScreenerCriteria, screen
-from stock_analyzer.analysis.ai import analyze_stock_stream, compare_stocks_stream
+from stock_analyzer.analysis.ai import (
+    analyze_stock_stream, compare_stocks_stream, analyze_financials_stream,
+)
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+def _bar_chart(data: dict, title: str, pct: bool = False, billions: bool = False) -> "go.Figure":
+    """Simple bar chart for {year_str: float} data."""
+    years = sorted(data.keys())
+    vals  = [data[y] for y in years]
+    if billions:
+        vals   = [v / 1e9 for v in vals]
+        ylabel = "USD (B)"
+    elif pct:
+        vals   = [v * 100 for v in vals]
+        ylabel = "%"
+    else:
+        ylabel = ""
+    colors = ["#d62728" if v < 0 else "#1f77b4" for v in vals]
+    fig = go.Figure(go.Bar(
+        x=years, y=vals, marker_color=colors,
+        text=[f"{v:.1f}" for v in vals], textposition="outside",
+    ))
+    fig.update_layout(
+        title=title, yaxis_title=ylabel,
+        template="plotly_white", height=280,
+        margin=dict(l=0, r=0, t=40, b=20),
+    )
+    return fig
+
 
 # ── Init ──────────────────────────────────────────────────────────────────────
 init_db()
@@ -42,7 +71,7 @@ st.sidebar.divider()
 # ── Sidebar navigation ────────────────────────────────────────────────────────
 page = st.sidebar.radio(
     "Navigation",
-    ["📊 Stock Overview", "🔍 Screener", "🤖 AI Analysis", "⚖️ Compare"],
+    ["📊 Stock Overview", "🔍 Screener", "🤖 AI Analysis", "📑 Financial Analysis", "⚖️ Compare"],
 )
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -109,6 +138,70 @@ if page == "📊 Stock Overview":
             })
 
         st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+
+        # 3-Year Historical Trends
+        st.subheader("3-Year Historical Trends")
+        with st.spinner("Loading financial history…"):
+            try:
+                inc = fetch_income_statement(symbol)
+                bs  = fetch_balance_sheet(symbol)
+                cf  = fetch_cash_flow(symbol)
+                hist = extract_historical_metrics(inc, bs, cf)
+            except Exception:
+                hist = {}
+
+        has_hist = any(v for v in hist.values())
+        if not has_hist:
+            st.caption("Historical financials not available (demo mode or data missing).")
+        else:
+            c1, c2 = st.columns(2)
+            with c1:
+                if hist.get("revenue"):
+                    st.plotly_chart(_bar_chart(hist["revenue"], "Revenue ($B)", billions=True),
+                                    use_container_width=True)
+                if hist.get("eps_hist"):
+                    st.plotly_chart(_bar_chart(hist["eps_hist"], "EPS – Diluted ($)"),
+                                    use_container_width=True)
+                if hist.get("free_cashflow_hist"):
+                    st.plotly_chart(_bar_chart(hist["free_cashflow_hist"], "Free Cash Flow ($B)", billions=True),
+                                    use_container_width=True)
+            with c2:
+                if hist.get("net_income"):
+                    st.plotly_chart(_bar_chart(hist["net_income"], "Net Income ($B)", billions=True),
+                                    use_container_width=True)
+                # Margins overlay
+                margin_data = {
+                    k: hist[k] for k in ("gross_margin_hist", "operating_margin_hist", "net_margin_hist")
+                    if hist.get(k)
+                }
+                if margin_data:
+                    fig_m = go.Figure()
+                    margin_labels = {
+                        "gross_margin_hist": "Gross Margin",
+                        "operating_margin_hist": "Operating Margin",
+                        "net_margin_hist": "Net Margin",
+                    }
+                    colors_m = ["#2ca02c", "#ff7f0e", "#1f77b4"]
+                    for (key, label), color in zip(margin_labels.items(), colors_m):
+                        d = hist.get(key, {})
+                        if d:
+                            yrs = sorted(d.keys())
+                            fig_m.add_trace(go.Scatter(
+                                x=yrs, y=[d[y] * 100 for y in yrs],
+                                mode="lines+markers", name=label,
+                                line=dict(color=color),
+                            ))
+                    fig_m.update_layout(
+                        title="Margin Trends (%)", yaxis_title="%",
+                        template="plotly_white", height=280,
+                        margin=dict(l=0, r=0, t=40, b=20),
+                    )
+                    st.plotly_chart(fig_m, use_container_width=True)
+                if hist.get("roe_hist"):
+                    st.plotly_chart(_bar_chart(hist["roe_hist"], "Return on Equity (%)", pct=True),
+                                    use_container_width=True)
+
+        st.divider()
 
         # Price chart
         st.subheader("Price History (1 Year)")
@@ -239,7 +332,145 @@ elif page == "🤖 AI Analysis":
         st.success("Report complete.")
 
 # ─────────────────────────────────────────────────────────────────────────────
-# PAGE 4 — Compare
+# PAGE 4 — Financial Analysis
+# ─────────────────────────────────────────────────────────────────────────────
+elif page == "📑 Financial Analysis":
+    st.title("📑 Financial Analysis")
+    st.caption("3-year financial statements and AI-powered trend analysis for a single stock.")
+
+    symbol = st.text_input("Ticker symbol", key="fin_ticker").strip().upper()
+
+    if symbol and st.button("Load Financials", type="primary"):
+        with st.spinner(f"Fetching {symbol}…"):
+            try:
+                info = fetch_stock(symbol)
+                inc  = fetch_income_statement(symbol)
+                bs   = fetch_balance_sheet(symbol)
+                cf   = fetch_cash_flow(symbol)
+                hist = extract_historical_metrics(inc, bs, cf)
+            except Exception as e:
+                st.error(str(e))
+                st.stop()
+
+        company_name = info.get("longName", symbol)
+        sector       = info.get("sector", "N/A")
+        st.subheader(company_name)
+        st.caption(f"{sector} · {info.get('industry', '')}")
+
+        has_hist = any(v for v in hist.values())
+        if not has_hist:
+            st.warning("Historical financial data not available (demo mode or data missing).")
+            st.stop()
+
+        # ── 3-Year Summary Table ───────────────────────────────────────────
+        st.subheader("3-Year Financial Summary")
+
+        all_years = sorted({
+            yr
+            for key in ("revenue", "net_income", "eps_hist", "gross_margin_hist",
+                        "operating_margin_hist", "net_margin_hist", "roe_hist",
+                        "total_assets", "total_debt", "free_cashflow_hist")
+            for yr in hist.get(key, {}).keys()
+        })
+
+        summary_rows = []
+        def _pct_change(d, years):
+            if len(years) >= 2:
+                v0, v1 = d.get(years[0]), d.get(years[-1])
+                if v0 and v1 and v0 != 0:
+                    return f"{(v1-v0)/abs(v0):+.1%}"
+            return "—"
+
+        metric_display = [
+            ("revenue",              "Revenue",           lambda v: f"${v/1e9:.1f}B",  False),
+            ("gross_profit",         "Gross Profit",      lambda v: f"${v/1e9:.1f}B",  False),
+            ("gross_margin_hist",    "Gross Margin",      lambda v: f"{v:.1%}",         True),
+            ("operating_income",     "Operating Income",  lambda v: f"${v/1e9:.1f}B",  False),
+            ("operating_margin_hist","Operating Margin",  lambda v: f"{v:.1%}",         True),
+            ("net_income",           "Net Income",        lambda v: f"${v/1e9:.1f}B",  False),
+            ("net_margin_hist",      "Net Margin",        lambda v: f"{v:.1%}",         True),
+            ("ebitda",               "EBITDA",            lambda v: f"${v/1e9:.1f}B",  False),
+            ("eps_hist",             "EPS (Diluted)",     lambda v: f"${v:.2f}",        False),
+            ("total_assets",         "Total Assets",      lambda v: f"${v/1e9:.1f}B",  False),
+            ("total_debt",           "Total Debt",        lambda v: f"${v/1e9:.1f}B",  False),
+            ("total_equity",         "Total Equity",      lambda v: f"${v/1e9:.1f}B",  False),
+            ("roe_hist",             "Return on Equity",  lambda v: f"{v:.1%}",         True),
+            ("operating_cashflow",   "Operating CF",      lambda v: f"${v/1e9:.1f}B",  False),
+            ("free_cashflow_hist",   "Free Cash Flow",    lambda v: f"${v/1e9:.1f}B",  False),
+        ]
+
+        for key, label, fmt, is_pct in metric_display:
+            data = hist.get(key, {})
+            if not data:
+                continue
+            row = {"Metric": label}
+            for yr in all_years:
+                v = data.get(yr)
+                row[yr] = fmt(v) if v is not None else "—"
+            row["Change"] = _pct_change(data, all_years)
+            summary_rows.append(row)
+
+        st.dataframe(pd.DataFrame(summary_rows), hide_index=True, use_container_width=True)
+
+        # ── Charts ────────────────────────────────────────────────────────
+        st.subheader("Charts")
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            if hist.get("revenue"):
+                st.plotly_chart(_bar_chart(hist["revenue"], "Revenue ($B)", billions=True),
+                                use_container_width=True)
+            if hist.get("eps_hist"):
+                st.plotly_chart(_bar_chart(hist["eps_hist"], "EPS – Diluted ($)"),
+                                use_container_width=True)
+        with c2:
+            if hist.get("net_income"):
+                st.plotly_chart(_bar_chart(hist["net_income"], "Net Income ($B)", billions=True),
+                                use_container_width=True)
+            if hist.get("roe_hist"):
+                st.plotly_chart(_bar_chart(hist["roe_hist"], "ROE (%)", pct=True),
+                                use_container_width=True)
+        with c3:
+            if hist.get("free_cashflow_hist"):
+                st.plotly_chart(_bar_chart(hist["free_cashflow_hist"], "Free Cash Flow ($B)", billions=True),
+                                use_container_width=True)
+            # Margins line chart
+            margin_data = {k: hist[k] for k in
+                           ("gross_margin_hist", "operating_margin_hist", "net_margin_hist")
+                           if hist.get(k)}
+            if margin_data:
+                fig_m = go.Figure()
+                mlabels = {"gross_margin_hist": "Gross", "operating_margin_hist": "Operating", "net_margin_hist": "Net"}
+                mcolors = ["#2ca02c", "#ff7f0e", "#1f77b4"]
+                for (k, lbl), col in zip(mlabels.items(), mcolors):
+                    d = margin_data.get(k, {})
+                    if d:
+                        yrs = sorted(d.keys())
+                        fig_m.add_trace(go.Scatter(
+                            x=yrs, y=[d[y]*100 for y in yrs],
+                            mode="lines+markers", name=lbl, line=dict(color=col),
+                        ))
+                fig_m.update_layout(title="Margins (%)", yaxis_title="%",
+                                    template="plotly_white", height=280,
+                                    margin=dict(l=0, r=0, t=40, b=20))
+                st.plotly_chart(fig_m, use_container_width=True)
+
+        # ── AI Financial Analysis ─────────────────────────────────────────
+        st.subheader("AI Financial Trend Analysis")
+        st.caption("Powered by AI — analyzing key drivers of change across the 3-year period.")
+        report_area = st.empty()
+        full_text = ""
+
+        with st.spinner("Analyzing financial trends…"):
+            for chunk in analyze_financials_stream(symbol, company_name, sector, hist):
+                full_text += chunk
+                report_area.markdown(full_text + "▌")
+
+        report_area.markdown(full_text)
+        st.success("Analysis complete.")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PAGE 5 — Compare
 # ─────────────────────────────────────────────────────────────────────────────
 elif page == "⚖️ Compare":
     st.title("⚖️ Compare Stocks")
