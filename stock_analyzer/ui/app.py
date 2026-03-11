@@ -10,11 +10,13 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
+from datetime import datetime
 
 from stock_analyzer.data.db import init_db
 from stock_analyzer.data.ingestion.yfinance_client import (
     fetch_stock, fetch_price_history, set_demo_mode, is_demo_mode,
     fetch_income_statement, fetch_balance_sheet, fetch_cash_flow,
+    fetch_news, fetch_industry_news, SECTOR_ETF,
 )
 from stock_analyzer.data.ingestion.demo_data import DEMO_STOCKS
 from stock_analyzer.analysis.fundamental import (
@@ -23,9 +25,32 @@ from stock_analyzer.analysis.fundamental import (
 from stock_analyzer.analysis.screener import ScreenerCriteria, screen
 from stock_analyzer.analysis.ai import (
     analyze_stock_stream, compare_stocks_stream, analyze_financials_stream,
+    analyze_stock_news_stream, analyze_industry_stream,
 )
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+def _render_news_item(item: dict):
+    """Render one Yahoo Finance news item."""
+    title     = item.get("title", "Untitled")
+    link      = item.get("link", "")
+    publisher = item.get("publisher", "")
+    ts        = item.get("providerPublishTime", 0)
+    date_str  = datetime.fromtimestamp(ts).strftime("%b %d, %Y") if ts else ""
+    tickers   = item.get("relatedTickers", [])
+
+    if link:
+        st.markdown(f"**[{title}]({link})**")
+    else:
+        st.markdown(f"**{title}**")
+    meta = f"_{publisher}_"
+    if date_str:
+        meta += f" · {date_str}"
+    if tickers:
+        meta += f" · {' '.join(tickers[:6])}"
+    st.caption(meta)
+    st.divider()
+
+
 def _bar_chart(data: dict, title: str, pct: bool = False, billions: bool = False) -> "go.Figure":
     """Simple bar chart for {year_str: float} data."""
     years = sorted(data.keys())
@@ -71,7 +96,8 @@ st.sidebar.divider()
 # ── Sidebar navigation ────────────────────────────────────────────────────────
 page = st.sidebar.radio(
     "Navigation",
-    ["📊 Stock Overview", "🔍 Screener", "🤖 AI Analysis", "📑 Financial Analysis", "⚖️ Compare"],
+    ["📊 Stock Overview", "🔍 Screener", "🤖 AI Analysis", "📑 Financial Analysis",
+     "📰 News & Industry", "⚖️ Compare"],
 )
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -470,7 +496,79 @@ elif page == "📑 Financial Analysis":
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# PAGE 5 — Compare
+# PAGE 5 — News & Industry Analysis
+# ─────────────────────────────────────────────────────────────────────────────
+elif page == "📰 News & Industry":
+    st.title("📰 News & Industry Analysis")
+    st.caption("Recent news for a single stock and AI-powered sector analysis.")
+
+    symbol = st.text_input("Ticker symbol", key="news_ticker").strip().upper()
+
+    if symbol and st.button("Load News", type="primary"):
+        with st.spinner(f"Fetching {symbol}…"):
+            try:
+                info = fetch_stock(symbol)
+                stock_news    = fetch_news(symbol)
+                industry_news = fetch_industry_news(info.get("sector", ""))
+            except Exception as e:
+                st.error(str(e))
+                st.stop()
+
+        company_name = info.get("longName", symbol)
+        sector       = info.get("sector", "N/A")
+        industry     = info.get("industry", "N/A")
+        etf_symbol   = SECTOR_ETF.get(sector, "")
+
+        st.subheader(company_name)
+        st.caption(f"{sector} · {industry}")
+        st.divider()
+
+        tab_stock, tab_industry = st.tabs(["📰 Stock News", "🏭 Industry Analysis"])
+
+        # ── Tab 1: Stock News ──────────────────────────────────────────────
+        with tab_stock:
+            if not stock_news:
+                st.info("No recent news available (demo mode or data unavailable).")
+            else:
+                st.caption(f"{len(stock_news)} recent articles")
+                for item in stock_news:
+                    _render_news_item(item)
+
+                st.subheader("AI News Analysis")
+                st.caption("Summarizing key themes and stock impact…")
+                news_area = st.empty()
+                full_news = ""
+                for chunk in analyze_stock_news_stream(symbol, company_name, sector, stock_news):
+                    full_news += chunk
+                    news_area.markdown(full_news + "▌")
+                news_area.markdown(full_news)
+
+        # ── Tab 2: Industry Analysis ───────────────────────────────────────
+        with tab_industry:
+            if etf_symbol:
+                st.caption(f"Sector news sourced from **{etf_symbol}** ETF · {sector}")
+            else:
+                st.caption(f"Sector: {sector} (no ETF mapping available)")
+
+            if not industry_news:
+                st.info("No industry news available (demo mode or sector not mapped).")
+            else:
+                st.caption(f"{len(industry_news)} recent articles")
+                for item in industry_news:
+                    _render_news_item(item)
+
+                st.subheader("AI Industry Analysis")
+                st.caption("Analyzing sector trends and competitive dynamics…")
+                ind_area = st.empty()
+                full_ind = ""
+                for chunk in analyze_industry_stream(sector, industry, company_name, industry_news):
+                    full_ind += chunk
+                    ind_area.markdown(full_ind + "▌")
+                ind_area.markdown(full_ind)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PAGE 6 — Compare
 # ─────────────────────────────────────────────────────────────────────────────
 elif page == "⚖️ Compare":
     st.title("⚖️ Compare Stocks")

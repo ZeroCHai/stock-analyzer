@@ -217,6 +217,102 @@ def analyze_financials_stream(symbol: str, company_name: str, sector: str, hist:
             yield content
 
 
+def analyze_stock_news_stream(symbol: str, company_name: str, sector: str, news_items: list):
+    """
+    Stream AI analysis of recent stock-specific news headlines.
+    """
+    if not news_items:
+        return
+    client = _get_client()
+    from datetime import datetime
+
+    lines = [
+        f"Company: {company_name} ({symbol})",
+        f"Sector: {sector}",
+        "",
+        "Recent News Headlines (newest first):",
+    ]
+    for item in news_items:
+        title = item.get("title", "")
+        publisher = item.get("publisher", "")
+        ts = item.get("providerPublishTime", 0)
+        date_str = datetime.fromtimestamp(ts).strftime("%Y-%m-%d") if ts else ""
+        lines.append(f"  [{date_str}] {title}  ({publisher})")
+
+    stream = client.chat.completions.create(
+        model=_effective_model(),
+        max_tokens=2048,
+        stream=True,
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {
+                "role": "user",
+                "content": (
+                    "Based on the following recent news headlines for this stock:\n"
+                    "1. Summarize the key news themes and material events\n"
+                    "2. Assess the likely impact on the stock (positive / negative / neutral) and why\n"
+                    "3. Identify significant near-term risks or catalysts\n"
+                    "4. Give an overall news sentiment assessment\n\n"
+                    + "\n".join(lines)
+                ),
+            },
+        ],
+    )
+    for chunk in stream:
+        content = chunk.choices[0].delta.content
+        if content:
+            yield content
+
+
+def analyze_industry_stream(sector: str, industry: str, company_name: str, news_items: list):
+    """
+    Stream AI analysis of sector/industry news and competitive dynamics.
+    """
+    if not news_items:
+        return
+    client = _get_client()
+    from datetime import datetime
+
+    lines = [
+        f"Sector: {sector}",
+        f"Industry: {industry}",
+        f"Company of interest: {company_name}",
+        "",
+        "Recent Sector/Industry News Headlines (newest first):",
+    ]
+    for item in news_items:
+        title = item.get("title", "")
+        publisher = item.get("publisher", "")
+        ts = item.get("providerPublishTime", 0)
+        date_str = datetime.fromtimestamp(ts).strftime("%Y-%m-%d") if ts else ""
+        lines.append(f"  [{date_str}] {title}  ({publisher})")
+
+    stream = client.chat.completions.create(
+        model=_effective_model(),
+        max_tokens=2048,
+        stream=True,
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {
+                "role": "user",
+                "content": (
+                    "Based on the following recent sector/industry news headlines:\n"
+                    "1. Identify the dominant industry themes and macro trends\n"
+                    "2. Assess competitive dynamics and any shifts in market structure\n"
+                    "3. Highlight major sector-wide opportunities and threats\n"
+                    "4. Evaluate the specific implications for the company mentioned above\n"
+                    "5. Provide an overall industry outlook (bullish / neutral / bearish)\n\n"
+                    + "\n".join(lines)
+                ),
+            },
+        ],
+    )
+    for chunk in stream:
+        content = chunk.choices[0].delta.content
+        if content:
+            yield content
+
+
 def compare_stocks_stream(infos: list[dict]):
     """
     Compare multiple stocks and recommend the best pick.

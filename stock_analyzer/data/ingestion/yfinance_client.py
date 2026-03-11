@@ -99,3 +99,40 @@ def fetch_cash_flow(symbol: str) -> pd.DataFrame:
     if is_demo_mode():
         return pd.DataFrame()
     return yf.Ticker(symbol.upper()).cashflow
+
+
+# ── News ───────────────────────────────────────────────────────────────────────
+
+# SPDR sector ETFs used as proxies for industry-level news
+SECTOR_ETF: dict[str, str] = {
+    "Technology":             "XLK",
+    "Healthcare":             "XLV",
+    "Financials":             "XLF",
+    "Consumer Discretionary": "XLY",
+    "Consumer Staples":       "XLP",
+    "Energy":                 "XLE",
+    "Utilities":              "XLU",
+    "Basic Materials":        "XLB",
+    "Industrials":            "XLI",
+    "Real Estate":            "XLRE",
+    "Communication Services": "XLC",
+}
+
+
+def fetch_news(symbol: str, max_items: int = 15) -> list:
+    """Return recent news for a symbol as a list of dicts from Yahoo Finance."""
+    if is_demo_mode():
+        return []
+    try:
+        news = yf.Ticker(symbol.upper()).news or []
+        return news[:max_items]
+    except Exception:
+        return []
+
+
+def fetch_industry_news(sector: str, max_items: int = 15) -> list:
+    """Return news for the SPDR sector ETF matching the given sector name."""
+    etf = SECTOR_ETF.get(sector, "")
+    if not etf:
+        return []
+    return fetch_news(etf, max_items)
