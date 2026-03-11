@@ -71,6 +71,11 @@ def _get_client():
 def _effective_model() -> str:
     """Return the model/endpoint name for the active provider."""
     if AI_PROVIDER == "ark":
+        if not ARK_EP_MODEL:
+            raise ValueError(
+                "ARK_MODEL is not configured. "
+                "Set ARK_MODEL=ep-XXXXXXXX-xxxxxx in your .env file."
+            )
         return ARK_EP_MODEL
     if GCP_PROJECT:
         return GEMINI_MODEL if GEMINI_MODEL.startswith("google/") else f"google/{GEMINI_MODEL}"

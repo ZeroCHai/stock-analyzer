@@ -134,13 +134,48 @@ SECTOR_PEERS: dict[str, list[str]] = {
 }
 
 
+def _normalize_news_item(item: dict) -> dict:
+    """
+    Normalize a Yahoo Finance news item to a consistent schema.
+
+    yfinance ≥0.2.38 wraps everything under a 'content' key with different
+    field names. This function returns the old flat schema so all downstream
+    code (UI renderer + AI prompts) works unchanged.
+    """
+    content = item.get("content")
+    if content:
+        # New format (yfinance 1.x)
+        pub_date = content.get("pubDate", "")
+        try:
+            from datetime import datetime
+            ts = int(datetime.fromisoformat(
+                pub_date.replace("Z", "+00:00")
+            ).timestamp())
+        except Exception:
+            ts = 0
+        tickers = [
+            t.get("symbol", "")
+            for t in content.get("finance", {}).get("stockTickers", [])
+            if t.get("symbol")
+        ]
+        return {
+            "title":               content.get("title", ""),
+            "link":                content.get("clickThroughUrl", {}).get("url", ""),
+            "publisher":           content.get("provider", {}).get("displayName", ""),
+            "providerPublishTime": ts,
+            "relatedTickers":      tickers,
+        }
+    # Old flat format — pass through as-is
+    return item
+
+
 def fetch_news(symbol: str, max_items: int = 15) -> list:
     """Return recent news for a symbol as a list of dicts from Yahoo Finance."""
     if is_demo_mode():
         return []
     try:
-        news = yf.Ticker(symbol.upper()).news or []
-        return news[:max_items]
+        raw = yf.Ticker(symbol.upper()).news or []
+        return [_normalize_news_item(item) for item in raw[:max_items]]
     except Exception:
         return []
 

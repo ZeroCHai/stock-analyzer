@@ -334,7 +334,7 @@ elif page == "🔍 Screener":
 # ─────────────────────────────────────────────────────────────────────────────
 elif page == "🤖 AI Analysis":
     st.title("🤖 AI Fundamental Analysis")
-    st.caption("Powered by Gemini 2.0 Flash (Google AI).")
+    st.caption("Powered by Ark Seed 2.0.")
 
     symbol = st.text_input("Ticker symbol").strip().upper()
 
