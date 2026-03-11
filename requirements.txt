@@ -4,3 +4,7 @@ yfinance
 pandas
 plotly
 python-dotenv
+# Gemini Vertex AI OAuth (needed when GOOGLE_CLOUD_PROJECT is set)
+google-auth
+# ByteDance Ark AK/SK (needed when AI_PROVIDER=ark with VOLC_ACCESSKEY/VOLC_SECRETKEY)
+volcenginesdkarkruntime
