@@ -122,8 +122,44 @@ hr { border-color: #2A2A32 !important; margin: 0.6rem 0; }
 
 /* ── Expander ── */
 [data-testid="stExpander"] summary { font-weight: 600; }
+
+/* ── Save as PDF button ── */
+.pdf-btn {
+    position: fixed;
+    top: 14px;
+    right: 16px;
+    z-index: 9999;
+    background-color: #1f77b4;
+    color: #ffffff;
+    font-weight: 700;
+    font-size: 0.8rem;
+    border: none;
+    border-radius: 20px;
+    padding: 0.4rem 1.1rem;
+    cursor: pointer;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.25);
+    transition: background-color 0.15s ease;
+}
+.pdf-btn:hover { background-color: #1560a0; }
+
+/* ── Print styles ── */
+@media print {
+    .pdf-btn { display: none !important; }
+    [data-testid="stSidebar"] { display: none !important; }
+    [data-testid="stToolbar"] { display: none !important; }
+    header { display: none !important; }
+    footer { display: none !important; }
+    .stDeployButton { display: none !important; }
+    [data-testid="stDecoration"] { display: none !important; }
+    .main .block-container { padding: 1rem !important; max-width: 100% !important; }
+}
 </style>
 """, unsafe_allow_html=True)
+
+st.markdown(
+    '<button class="pdf-btn" onclick="window.print()">⬇ Save as PDF</button>',
+    unsafe_allow_html=True,
+)
 
 # ── Demo mode toggle (sidebar) ────────────────────────────────────────────────
 st.sidebar.divider()
