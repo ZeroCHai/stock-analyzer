@@ -11,9 +11,9 @@ from __future__ import annotations
 import time
 from openai import OpenAI
 from stock_analyzer.config import (
-    ARK_API_KEY, ARK_BASE_URL, MODEL,
-    AI_PROVIDER, GCP_PROJECT, GCP_LOCATION,
-    VOLC_AK, VOLC_SK, ARK_EP_MODEL,
+    AI_PROVIDER,
+    ARK_API_KEY, ARK_BASE_URL, ARK_EP_MODEL, VOLC_AK, VOLC_SK,
+    GEMINI_API_KEY, GEMINI_BASE_URL, GEMINI_MODEL, GCP_PROJECT, GCP_LOCATION,
 )
 from stock_analyzer.analysis.fundamental import extract_metrics, METRIC_LABELS
 
@@ -40,8 +40,10 @@ def _make_vertex_client() -> tuple:
 
 def _get_client():
     """
-    Return the appropriate AI client based on environment configuration.
-    Automatically refreshes Vertex AI OAuth tokens before expiry.
+    Return the appropriate AI client based on AI_PROVIDER.
+
+    Ark  (default): AK/SK → API key
+    Gemini:         Vertex AI OAuth → API key
     """
     global _client, _oauth_expires_at
 
@@ -54,26 +56,25 @@ def _get_client():
                 _client = OpenAI(api_key=ARK_API_KEY, base_url=ARK_BASE_URL)
         return _client
 
-    # Gemini — OAuth via Vertex AI
+    # Gemini — Vertex AI OAuth
     if GCP_PROJECT:
-        if time.time() >= _oauth_expires_at - 300:  # refresh 5 min before expiry
+        if time.time() >= _oauth_expires_at - 300:
             _client, _oauth_expires_at = _make_vertex_client()
         return _client
 
-    # Gemini — API key (default)
+    # Gemini — API key
     if _client is None:
-        _client = OpenAI(api_key=ARK_API_KEY, base_url=ARK_BASE_URL)
+        _client = OpenAI(api_key=GEMINI_API_KEY, base_url=GEMINI_BASE_URL)
     return _client
 
 
 def _effective_model() -> str:
-    """Return the model name appropriate for the active provider/auth mode."""
+    """Return the model/endpoint name for the active provider."""
     if AI_PROVIDER == "ark":
-        return ARK_EP_MODEL or MODEL
+        return ARK_EP_MODEL
     if GCP_PROJECT:
-        # Vertex AI OpenAI-compatible endpoint expects "google/<model-name>"
-        return MODEL if MODEL.startswith("google/") else f"google/{MODEL}"
-    return MODEL
+        return GEMINI_MODEL if GEMINI_MODEL.startswith("google/") else f"google/{GEMINI_MODEL}"
+    return GEMINI_MODEL
 
 
 def _format_metrics(info: dict) -> str:
