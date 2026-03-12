@@ -38,44 +38,28 @@ def _make_vertex_client() -> tuple:
     return OpenAI(api_key=creds.token, base_url=base_url), time.time() + 3600
 
 
-def _patch_ark_send(client) -> None:
+def _patch_ark_build_request(client) -> None:
     """
-    Monkeypatch the internal httpx.Client.send on an Ark SDK client so that
-    openai 2.x fields (store, stream_options, service_tier) are stripped from
-    the request body before the bytes hit the network.
+    Strip openai 2.x fields (store, stream_options, service_tier) from the
+    request body BEFORE _build_request serialises it to JSON bytes.
 
-    This runs AFTER auth headers are injected by the Ark SDK, so auth is
-    unaffected.  ARK uses Bearer-token auth (not body-signing), so modifying
-    the body after the auth header is added is safe.
+    This is the correct interception point for the VOLC AK/SK path because
+    volcenginesdkarkruntime computes its HMAC signature over the serialised
+    JSON bytes.  Stripping at the httpx level (after serialisation) would
+    invalidate the signature; stripping here — before serialisation — keeps
+    the signature consistent with the body that is actually sent.
     """
-    import httpx as _httpx
-    import json as _json
-
     _STRIP = frozenset(["store", "stream_options", "service_tier"])
-    _orig = client._client.send  # openai SyncAPIClient stores httpx as _client
+    _orig = client._build_request  # bound method
 
-    def _send(request: _httpx.Request, **kwargs):
-        try:
-            body = _json.loads(request.content)
-            if any(f in body for f in _STRIP):
-                for f in _STRIP:
-                    body.pop(f, None)
-                new_bytes = _json.dumps(body).encode()
-                # Rebuild request preserving all existing headers (incl. auth)
-                hdrs = [(k, v) for k, v in request.headers.items()
-                        if k.lower() != "content-length"]
-                hdrs.append(("content-length", str(len(new_bytes))))
-                request = _httpx.Request(
-                    method=request.method,
-                    url=str(request.url),
-                    headers=hdrs,
-                    content=new_bytes,
-                )
-        except Exception:
-            pass
-        return _orig(request, **kwargs)
+    def _patched(options):
+        jd = getattr(options, "json_data", None)
+        if isinstance(jd, dict):
+            for f in _STRIP:
+                jd.pop(f, None)
+        return _orig(options)
 
-    client._client.send = _send
+    client._build_request = _patched
 
 
 def _ark_direct_stream(model: str, messages: list, max_tokens: int):
@@ -139,7 +123,7 @@ def _get_client():
             if _client is None:
                 from volcenginesdkarkruntime import Ark
                 _client = Ark(ak=VOLC_AK, sk=VOLC_SK)
-                _patch_ark_send(_client)
+                _patch_ark_build_request(_client)
             return _client
         return None  # misconfigured — will raise in _effective_model()
 

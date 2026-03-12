@@ -116,7 +116,18 @@ hr { border-color: #2A2A32 !important; margin: 0.6rem 0; }
 [data-testid="stDataFrame"] { border-radius: 8px; }
 
 /* ── Sidebar nav ── */
-[data-testid="stSidebar"] .stRadio label { font-size: 0.88rem; font-weight: 500; }
+[data-testid="stSidebar"] .stRadio label {
+    font-size: 1.05rem !important;
+    font-weight: 700 !important;
+    letter-spacing: 0.01em;
+}
+[data-testid="stSidebar"] .stRadio > label {
+    font-size: 0.8rem !important;
+    font-weight: 600 !important;
+    color: #888888 !important;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+}
 
 /* ── Input fields ── */
 [data-testid="stTextInput"] input { border-radius: 8px; }
@@ -161,6 +172,14 @@ st.markdown(
     '<button class="pdf-btn" onclick="window.print()">⬇ Save as PDF</button>',
     unsafe_allow_html=True,
 )
+
+# ── Sidebar header ────────────────────────────────────────────────────────────
+st.sidebar.markdown(
+    "<h2 style='margin:0 0 0.1rem 0; font-size:1.4rem; font-weight:800;"
+    " letter-spacing:-0.01em;'>📈 Stock Analyzer</h2>",
+    unsafe_allow_html=True,
+)
+st.sidebar.caption("US equity research · powered by AI")
 
 # ── Demo mode toggle (sidebar) ────────────────────────────────────────────────
 st.sidebar.divider()
