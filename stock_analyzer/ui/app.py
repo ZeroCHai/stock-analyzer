@@ -10,6 +10,7 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
+from plotly.subplots import make_subplots
 from datetime import datetime
 
 from stock_analyzer.data.db import init_db
@@ -26,7 +27,7 @@ from stock_analyzer.analysis.fundamental import (
 from stock_analyzer.analysis.screener import ScreenerCriteria, screen
 from stock_analyzer.analysis.ai import (
     analyze_stock_stream, compare_stocks_stream, analyze_financials_stream,
-    analyze_stock_news_stream, analyze_industry_stream,
+    analyze_stock_news_stream, analyze_industry_stream, analyze_technicals_stream,
 )
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -178,7 +179,7 @@ st.sidebar.divider()
 page = st.sidebar.radio(
     "Navigation",
     ["📊 Stock Overview", "🔍 Screener", "🤖 AI Analysis", "📑 Financial Analysis",
-     "📰 Stock News", "🏭 Industry", "⚖️ Compare"],
+     "📰 Stock News", "🏭 Industry", "⚖️ Compare", "📈 Technical Analysis"],
 )
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -769,3 +770,199 @@ elif page == "⚖️ Compare":
 
         report_area.markdown(full_text)
         st.success("Comparison complete.")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PAGE 8 — Technical Analysis
+# ─────────────────────────────────────────────────────────────────────────────
+elif page == "📈 Technical Analysis":
+    st.title("📈 Technical Analysis")
+    st.caption("K-line · Volume · MA · Bollinger Bands · RSI · MACD · AI Trading Idea")
+
+    symbol = st.text_input("Ticker symbol", key="ta_ticker").strip().upper()
+    period = st.selectbox("Period", ["1mo", "3mo", "6mo", "1y", "2y"], index=3, key="ta_period")
+
+    if symbol and st.button("Analyze", type="primary", key="ta_btn"):
+        with st.spinner(f"Loading {symbol}…"):
+            try:
+                info = fetch_stock(symbol)
+                df   = fetch_price_history(symbol, period=period)
+            except Exception as e:
+                st.error(str(e))
+                st.stop()
+
+        if df.empty:
+            st.error("No price data available.")
+            st.stop()
+
+        company_name = info.get("longName", symbol)
+        st.subheader(company_name)
+        st.caption(f"{info.get('sector','')} · {info.get('industry','')}")
+
+        # ── Compute indicators ─────────────────────────────────────────────
+        df = df.copy()
+        df["MA20"]  = df["Close"].rolling(20).mean()
+        df["MA50"]  = df["Close"].rolling(50).mean()
+        df["MA200"] = df["Close"].rolling(200).mean()
+
+        df["BB_mid"]   = df["Close"].rolling(20).mean()
+        df["BB_std"]   = df["Close"].rolling(20).std()
+        df["BB_upper"] = df["BB_mid"] + 2 * df["BB_std"]
+        df["BB_lower"] = df["BB_mid"] - 2 * df["BB_std"]
+
+        delta    = df["Close"].diff()
+        gain     = delta.clip(lower=0)
+        loss     = (-delta).clip(lower=0)
+        avg_gain = gain.ewm(com=13, adjust=False).mean()
+        avg_loss = loss.ewm(com=13, adjust=False).mean()
+        rs       = avg_gain / avg_loss.replace(0, float("nan"))
+        df["RSI"] = 100 - (100 / (1 + rs))
+
+        ema12         = df["Close"].ewm(span=12, adjust=False).mean()
+        ema26         = df["Close"].ewm(span=26, adjust=False).mean()
+        df["MACD"]    = ema12 - ema26
+        df["Signal"]  = df["MACD"].ewm(span=9, adjust=False).mean()
+        df["MACD_hist"] = df["MACD"] - df["Signal"]
+
+        last  = df.iloc[-1]
+        price = last["Close"]
+
+        # ── Summary metrics row ────────────────────────────────────────────
+        rsi_val  = last["RSI"]
+        macd_val = last["MACD"]
+        sig_val  = last["Signal"]
+        ma20_val = last["MA20"]
+        ma50_val = last["MA50"]
+
+        col1, col2, col3, col4, col5 = st.columns(5)
+        with col1:
+            st.metric("Price", f"${price:.2f}")
+        with col2:
+            if pd.notna(ma20_val):
+                d = (price - ma20_val) / ma20_val
+                st.metric("vs MA20", f"${ma20_val:.2f}", f"{d:+.1%}")
+        with col3:
+            if pd.notna(ma50_val):
+                d = (price - ma50_val) / ma50_val
+                st.metric("vs MA50", f"${ma50_val:.2f}", f"{d:+.1%}")
+        with col4:
+            if pd.notna(rsi_val):
+                lbl = "Overbought" if rsi_val > 70 else "Oversold" if rsi_val < 30 else "Neutral"
+                st.metric("RSI(14)", f"{rsi_val:.1f}", lbl)
+        with col5:
+            if pd.notna(macd_val) and pd.notna(sig_val):
+                cross = "Bullish" if macd_val > sig_val else "Bearish"
+                st.metric("MACD Signal", f"{macd_val:.3f}", cross)
+
+        st.divider()
+
+        # ── Charts ─────────────────────────────────────────────────────────
+        tab1, tab2, tab3 = st.tabs(["K线 + MA + 布林带", "RSI", "MACD"])
+
+        with tab1:
+            fig = make_subplots(
+                rows=2, cols=1, shared_xaxes=True,
+                row_heights=[0.75, 0.25],
+                vertical_spacing=0.03,
+            )
+            fig.add_trace(go.Candlestick(
+                x=df.index, open=df["Open"], high=df["High"],
+                low=df["Low"], close=df["Close"],
+                name="OHLC",
+                increasing_line_color="#00C805",
+                decreasing_line_color="#FF3B3B",
+            ), row=1, col=1)
+
+            # Bollinger Bands
+            fig.add_trace(go.Scatter(
+                x=df.index, y=df["BB_upper"], name="BB Upper",
+                line=dict(color="#aaaaaa", width=1, dash="dot"),
+            ), row=1, col=1)
+            fig.add_trace(go.Scatter(
+                x=df.index, y=df["BB_lower"], name="BB Lower",
+                line=dict(color="#aaaaaa", width=1, dash="dot"),
+                fill="tonexty", fillcolor="rgba(150,150,150,0.08)",
+            ), row=1, col=1)
+
+            # Moving averages
+            for ma_col, color in [("MA20", "#f5a623"), ("MA50", "#4a90d9"), ("MA200", "#9b59b6")]:
+                if df[ma_col].notna().any():
+                    fig.add_trace(go.Scatter(
+                        x=df.index, y=df[ma_col], name=ma_col,
+                        line=dict(color=color, width=1.5),
+                    ), row=1, col=1)
+
+            # Volume bars
+            vol_colors = [
+                "#00C805" if c >= o else "#FF3B3B"
+                for c, o in zip(df["Close"], df["Open"])
+            ]
+            fig.add_trace(go.Bar(
+                x=df.index, y=df["Volume"], name="Volume",
+                marker_color=vol_colors, showlegend=False,
+            ), row=2, col=1)
+
+            fig.update_layout(
+                xaxis_rangeslider_visible=False,
+                template="plotly_white", height=620,
+                margin=dict(l=0, r=0, t=30, b=0),
+                legend=dict(orientation="h", yanchor="bottom", y=1.01, x=0),
+            )
+            fig.update_yaxes(title_text="Price (USD)", row=1, col=1)
+            fig.update_yaxes(title_text="Volume", row=2, col=1)
+            st.plotly_chart(fig, use_container_width=True)
+
+        with tab2:
+            fig_rsi = go.Figure()
+            fig_rsi.add_trace(go.Scatter(
+                x=df.index, y=df["RSI"], name="RSI(14)",
+                line=dict(color="#4a90d9", width=2),
+            ))
+            fig_rsi.add_hline(y=70, line_dash="dash", line_color="red",
+                               annotation_text="超买 70", annotation_position="right")
+            fig_rsi.add_hline(y=30, line_dash="dash", line_color="green",
+                               annotation_text="超卖 30", annotation_position="right")
+            fig_rsi.add_hline(y=50, line_dash="dot", line_color="#999999")
+            fig_rsi.update_layout(
+                title="RSI (14)", yaxis_title="RSI", yaxis_range=[0, 100],
+                template="plotly_white", height=350,
+                margin=dict(l=0, r=0, t=40, b=0),
+            )
+            st.plotly_chart(fig_rsi, use_container_width=True)
+
+        with tab3:
+            fig_macd = go.Figure()
+            hist_colors = [
+                "#00C805" if v >= 0 else "#FF3B3B"
+                for v in df["MACD_hist"].fillna(0)
+            ]
+            fig_macd.add_trace(go.Bar(
+                x=df.index, y=df["MACD_hist"], name="Histogram",
+                marker_color=hist_colors,
+            ))
+            fig_macd.add_trace(go.Scatter(
+                x=df.index, y=df["MACD"], name="MACD",
+                line=dict(color="#4a90d9", width=2),
+            ))
+            fig_macd.add_trace(go.Scatter(
+                x=df.index, y=df["Signal"], name="Signal",
+                line=dict(color="#f5a623", width=1.5),
+            ))
+            fig_macd.update_layout(
+                title="MACD (12, 26, 9)", yaxis_title="Value",
+                template="plotly_white", height=350,
+                margin=dict(l=0, r=0, t=40, b=0),
+            )
+            st.plotly_chart(fig_macd, use_container_width=True)
+
+        # ── AI Trading Idea ────────────────────────────────────────────────
+        st.subheader("AI Trading Idea")
+        st.caption("基于技术指标，仅供学习参考，不构成投资建议。")
+
+        idea_area = st.empty()
+        full_idea = ""
+        with st.spinner("Generating trading idea…"):
+            for chunk in analyze_technicals_stream(symbol, company_name, df, info):
+                full_idea += chunk
+                idea_area.markdown(full_idea + "▌")
+        idea_area.markdown(full_idea)

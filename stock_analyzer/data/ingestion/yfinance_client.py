@@ -153,15 +153,17 @@ def _normalize_news_item(item: dict) -> dict:
             ).timestamp())
         except Exception:
             ts = 0
+        click_url    = content.get("clickThroughUrl") or {}
+        canonical    = content.get("canonicalUrl") or {}
         tickers = [
             t.get("symbol", "")
-            for t in content.get("finance", {}).get("stockTickers", [])
+            for t in (content.get("finance") or {}).get("stockTickers", [])
             if t.get("symbol")
         ]
         return {
             "title":               content.get("title", ""),
-            "link":                content.get("clickThroughUrl", {}).get("url", ""),
-            "publisher":           content.get("provider", {}).get("displayName", ""),
+            "link":                click_url.get("url", "") or canonical.get("url", ""),
+            "publisher":           (content.get("provider") or {}).get("displayName", ""),
             "providerPublishTime": ts,
             "relatedTickers":      tickers,
         }

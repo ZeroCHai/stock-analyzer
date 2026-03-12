@@ -331,6 +331,125 @@ def analyze_industry_stream(
             yield content
 
 
+_TA_SYSTEM = """You are a professional technical analyst specialising in price action and momentum.
+Given technical indicator data, provide a clear, actionable trading idea.
+Structure your response with these exact sections:
+1. **Technical Summary** — overall trend (bullish / neutral / bearish) and key signals
+2. **Trading Idea** — direction (long / short / wait) with indicator-based rationale
+3. **Key Levels** — entry zone, price target(s), stop-loss
+4. **Risk/Reward** — estimated ratio and timing horizon (swing: days–weeks, position: weeks–months)
+5. **Key Risks** — what would invalidate this setup
+End with a one-sentence verdict.
+Note: educational purposes only, not investment advice."""
+
+
+def analyze_technicals_stream(symbol: str, company_name: str, df, info: dict | None = None):
+    """
+    Stream an AI trading idea based on computed technical indicators.
+
+    df must contain columns: Close, High, Low, Open, Volume,
+    MA20, MA50, MA200, RSI, MACD, Signal, BB_upper, BB_lower, BB_mid
+    """
+    import pandas as pd
+
+    client = _get_client()
+    last  = df.iloc[-1]
+    price = last["Close"]
+
+    def _pct(n):
+        if len(df) > n:
+            return (price - df["Close"].iloc[-n - 1]) / df["Close"].iloc[-n - 1]
+        return None
+
+    vol_20avg = df["Volume"].rolling(20).mean().iloc[-1]
+    vol_ratio = last["Volume"] / vol_20avg if vol_20avg and vol_20avg > 0 else None
+
+    high_52 = df["High"].max()
+    low_52  = df["Low"].min()
+    pos_52  = (price - low_52) / (high_52 - low_52) if high_52 != low_52 else None
+
+    rsi_val  = last["RSI"]
+    macd_val = last["MACD"]
+    sig_val  = last["Signal"]
+    bb_upper = last["BB_upper"]
+    bb_lower = last["BB_lower"]
+    bb_mid   = last["BB_mid"]
+
+    def _f(v, fmt=".2f"):
+        return f"{v:{fmt}}" if pd.notna(v) else "N/A"
+
+    def _above(cur, ref):
+        return "above" if pd.notna(ref) and cur > ref else "below"
+
+    bb_pos = (
+        "near upper band" if pd.notna(bb_upper) and price >= 0.97 * bb_upper
+        else "near lower band" if pd.notna(bb_lower) and price <= 1.03 * bb_lower
+        else "mid-range"
+    )
+    rsi_label = (
+        "Overbought" if pd.notna(rsi_val) and rsi_val > 70
+        else "Oversold" if pd.notna(rsi_val) and rsi_val < 30
+        else "Neutral"
+    )
+    macd_label = (
+        "Bullish crossover" if pd.notna(macd_val) and pd.notna(sig_val) and macd_val > sig_val
+        else "Bearish crossover"
+    )
+
+    perf_5d  = _pct(5)
+    perf_20d = _pct(20)
+    perf_60d = _pct(60)
+
+    lines = [
+        f"Symbol: {symbol}  ({company_name})",
+        f"Sector: {info.get('sector', 'N/A')}" if info else "",
+        f"Current Price: ${_f(price)}",
+        "",
+        "--- Price vs Moving Averages ---",
+        f"MA20:  ${_f(last['MA20'])}  → {_above(price, last['MA20'])}",
+        f"MA50:  ${_f(last['MA50'])}  → {_above(price, last['MA50'])}",
+        f"MA200: ${_f(last['MA200'])} → {_above(price, last['MA200'])}",
+        "",
+        "--- Bollinger Bands (20, 2σ) ---",
+        f"Upper: ${_f(bb_upper)}  Mid: ${_f(bb_mid)}  Lower: ${_f(bb_lower)}",
+        f"Position: {bb_pos}",
+        "",
+        "--- Momentum ---",
+        f"RSI(14): {_f(rsi_val, '.1f')}  ({rsi_label})",
+        f"MACD: {_f(macd_val, '.4f')}  Signal: {_f(sig_val, '.4f')}  → {macd_label}",
+        "",
+        "--- Recent Performance ---",
+        f"5-day:   {f'{perf_5d:+.1%}' if perf_5d is not None else 'N/A'}",
+        f"20-day:  {f'{perf_20d:+.1%}' if perf_20d is not None else 'N/A'}",
+        f"60-day:  {f'{perf_60d:+.1%}' if perf_60d is not None else 'N/A'}",
+        f"52w range: ${_f(low_52)} – ${_f(high_52)}  "
+        f"(currently at {f'{pos_52:.0%}' if pos_52 is not None else 'N/A'} of range)",
+        "",
+        "--- Volume ---",
+        f"Latest vs 20-day avg: {f'{vol_ratio:.2f}x' if vol_ratio else 'N/A'}",
+    ]
+
+    stream = client.chat.completions.create(
+        model=_effective_model(),
+        max_tokens=2048,
+        stream=True,
+        messages=[
+            {"role": "system", "content": _TA_SYSTEM},
+            {
+                "role": "user",
+                "content": (
+                    "Generate a trading idea based on the following technical data:\n\n"
+                    + "\n".join(l for l in lines if l is not None)
+                ),
+            },
+        ],
+    )
+    for chunk in stream:
+        content = chunk.choices[0].delta.content
+        if content:
+            yield content
+
+
 def compare_stocks_stream(infos: list[dict]):
     """
     Compare multiple stocks and recommend the best pick.
