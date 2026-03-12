@@ -8,14 +8,31 @@ Supports three authentication modes (auto-detected from environment):
 """
 
 from __future__ import annotations
+import os
 import time
 from openai import OpenAI
-from stock_analyzer.config import (
-    AI_PROVIDER,
-    ARK_API_KEY, ARK_BASE_URL, ARK_EP_MODEL, VOLC_AK, VOLC_SK,
-    GEMINI_API_KEY, GEMINI_BASE_URL, GEMINI_MODEL, GCP_PROJECT, GCP_LOCATION,
-)
+from stock_analyzer.config import ARK_BASE_URL, GEMINI_BASE_URL
 from stock_analyzer.analysis.fundamental import extract_metrics, METRIC_LABELS
+
+
+def _cfg(key: str, default: str = "") -> str:
+    """
+    Read a secret/config value at CALL TIME (not import time).
+
+    Streamlit Cloud makes st.secrets available lazily — reading at module
+    import time can silently return "" because the Streamlit runtime may not
+    be fully initialised yet.  Calling this inside each function guarantees
+    the value is read after the app has fully started.
+    """
+    val = os.environ.get(key, "")
+    if val:
+        return val
+    try:
+        import streamlit as st
+        return str(st.secrets.get(key, default))
+    except Exception:
+        return default
+
 
 _client = None
 _oauth_expires_at: float = 0.0
@@ -30,10 +47,11 @@ def _make_vertex_client() -> tuple:
         scopes=["https://www.googleapis.com/auth/cloud-platform"]
     )
     creds.refresh(google.auth.transport.requests.Request())
-    proj = GCP_PROJECT or project
+    proj     = _cfg("GOOGLE_CLOUD_PROJECT") or project
+    location = _cfg("GEMINI_LOCATION", "us-central1")
     base_url = (
-        f"https://{GCP_LOCATION}-aiplatform.googleapis.com/v1beta1/"
-        f"projects/{proj}/locations/{GCP_LOCATION}/endpoints/openapi/"
+        f"https://{location}-aiplatform.googleapis.com/v1beta1/"
+        f"projects/{proj}/locations/{location}/endpoints/openapi/"
     )
     return OpenAI(api_key=creds.token, base_url=base_url), time.time() + 3600
 
@@ -71,9 +89,16 @@ def _ark_direct_stream(model: str, messages: list, max_tokens: int):
     import requests
     import json as _json
 
+    api_key = _cfg("ARK_API_KEY")
+    if not api_key:
+        raise ValueError(
+            "ARK_API_KEY is not configured. "
+            "Add ARK_API_KEY to your Streamlit Cloud Secrets."
+        )
+
     url = f"{ARK_BASE_URL}/chat/completions"
     headers = {
-        "Authorization": f"Bearer {ARK_API_KEY}",
+        "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
     }
     payload = {
@@ -113,44 +138,57 @@ def _get_client():
     """
     global _client, _oauth_expires_at
 
-    if AI_PROVIDER == "ark":
+    # Read config fresh at call time — avoids Streamlit import-time issues
+    ai_provider = _cfg("AI_PROVIDER", "ark")
+    ark_api_key = _cfg("ARK_API_KEY")
+    volc_ak     = _cfg("VOLC_ACCESSKEY")
+    volc_sk     = _cfg("VOLC_SECRETKEY")
+    gcp_project = _cfg("GOOGLE_CLOUD_PROJECT")
+    gemini_key  = _cfg("GEMINI_API_KEY")
+    gemini_model = _cfg("GEMINI_MODEL", "gemini-2.0-flash")
+
+    if ai_provider == "ark":
         # Prefer ARK_API_KEY: use direct HTTP, bypassing openai SDK entirely.
-        if ARK_API_KEY:
+        if ark_api_key:
             return None
-        # Fallback: AK/SK via volcenginesdkarkruntime, with send-level patch
-        # to strip openai 2.x fields (store, stream_options, service_tier).
-        if VOLC_AK and VOLC_SK:
+        # Fallback: AK/SK via volcenginesdkarkruntime
+        if volc_ak and volc_sk:
             if _client is None:
                 from volcenginesdkarkruntime import Ark
-                _client = Ark(ak=VOLC_AK, sk=VOLC_SK)
+                _client = Ark(ak=volc_ak, sk=volc_sk)
                 _patch_ark_build_request(_client)
             return _client
-        return None  # misconfigured — will raise in _effective_model()
+        return None  # misconfigured — will raise clearly in _effective_model()
 
     # Gemini — Vertex AI OAuth
-    if GCP_PROJECT:
+    if gcp_project:
         if time.time() >= _oauth_expires_at - 300:
             _client, _oauth_expires_at = _make_vertex_client()
         return _client
 
     # Gemini — API key
     if _client is None:
-        _client = OpenAI(api_key=GEMINI_API_KEY, base_url=GEMINI_BASE_URL)
+        _client = OpenAI(api_key=gemini_key, base_url=GEMINI_BASE_URL)
     return _client
 
 
 def _effective_model() -> str:
     """Return the model/endpoint name for the active provider."""
-    if AI_PROVIDER == "ark":
-        if not ARK_EP_MODEL:
+    ai_provider  = _cfg("AI_PROVIDER", "ark")
+    ark_model    = _cfg("ARK_MODEL")
+    gcp_project  = _cfg("GOOGLE_CLOUD_PROJECT")
+    gemini_model = _cfg("GEMINI_MODEL", "gemini-2.0-flash")
+
+    if ai_provider == "ark":
+        if not ark_model:
             raise ValueError(
                 "ARK_MODEL is not configured. "
-                "Set ARK_MODEL=ep-XXXXXXXX-xxxxxx in your .env file."
+                "Add ARK_MODEL=ep-XXXXXXXX-xxxxxx to your Streamlit Cloud Secrets."
             )
-        return ARK_EP_MODEL
-    if GCP_PROJECT:
-        return GEMINI_MODEL if GEMINI_MODEL.startswith("google/") else f"google/{GEMINI_MODEL}"
-    return GEMINI_MODEL
+        return ark_model
+    if gcp_project:
+        return gemini_model if gemini_model.startswith("google/") else f"google/{gemini_model}"
+    return gemini_model
 
 
 def _format_metrics(info: dict) -> str:
