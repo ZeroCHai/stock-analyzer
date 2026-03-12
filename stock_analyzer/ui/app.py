@@ -338,19 +338,17 @@ st.sidebar.divider()
 # ── Sidebar navigation ────────────────────────────────────────────────────────
 page = st.sidebar.radio(
     "Navigation",
-    ["📊 Stock Overview", "🔍 Screener", "📑 Financial Analysis",
+    ["🌍 Global Markets", "📊 Stock Overview", "🔍 Screener", "📑 Financial Analysis",
      "📰 Stock News", "🏭 Sector Markets", "⚖️ Compare", "📈 Technical Analysis",
      "🎯 Prediction Markets"],
 )
 
 # ─────────────────────────────────────────────────────────────────────────────
-# PAGE 1 — Stock Overview (home: global indices + stock lookup)
+# PAGE 0 — Global Markets (home page)
 # ─────────────────────────────────────────────────────────────────────────────
-if page == "📊 Stock Overview":
-    st.title("📊 Stock Overview")
-
-    # ── Global Market Indices ─────────────────────────────────────────────
-    st.markdown('<div class="sec-lbl">Global Markets</div>', unsafe_allow_html=True)
+if page == "🌍 Global Markets":
+    st.title("🌍 Global Markets")
+    st.caption("Real-time performance of major indices, commodities, and volatility — powered by Yahoo Finance.")
 
     if is_demo_mode():
         st.info("Live market data requires a network connection. Disable Demo Mode to load global indices.")
@@ -361,7 +359,6 @@ if page == "📊 Stock Overview":
         if not indices:
             st.warning("Could not load market data. Check your network connection.")
         else:
-            # Group by region
             regions_order = ["Americas", "Europe", "Asia-Pacific", "Commodities", "Volatility"]
             by_region: dict[str, list] = {}
             for idx in indices:
@@ -374,15 +371,12 @@ if page == "📊 Stock Overview":
                 arrow = "▲" if v >= 0 else "▼"
                 return f'<span style="color:{color};font-family:var(--mono);font-size:0.82rem">{arrow} {abs(v)*100:.2f}%</span>'
 
-            def _price_html(v, sym) -> str:
-                # Integer display for large indices, 2 dp for smaller
+            def _price_fmt(v) -> str:
                 if v >= 1000:
-                    fmt = f"{v:,.0f}"
+                    return f"{v:,.0f}"
                 elif v >= 10:
-                    fmt = f"{v:,.2f}"
-                else:
-                    fmt = f"{v:.4f}"
-                return f'<span style="font-family:var(--mono);font-weight:600">{fmt}</span>'
+                    return f"{v:,.2f}"
+                return f"{v:.4f}"
 
             for region in regions_order:
                 items = by_region.get(region)
@@ -390,17 +384,14 @@ if page == "📊 Stock Overview":
                     continue
                 st.markdown(
                     f'<div style="font-size:0.6rem;font-weight:700;text-transform:uppercase;'
-                    f'letter-spacing:0.1em;color:var(--muted);margin:0.9rem 0 0.4rem">— {region} —</div>',
+                    f'letter-spacing:0.1em;color:var(--muted);margin:1rem 0 0.45rem">— {region} —</div>',
                     unsafe_allow_html=True,
                 )
                 cols = st.columns(len(items))
                 for col, item in zip(cols, items):
                     with col:
                         chg_1d = item.get("chg_1d")
-                        border_color = (
-                            "var(--green)" if (chg_1d or 0) >= 0
-                            else "var(--red)"
-                        )
+                        border_color = "var(--green)" if (chg_1d or 0) >= 0 else "var(--red)"
                         st.markdown(
                             f'<div style="background:var(--surface);border:1px solid var(--border);'
                             f'border-top:2px solid {border_color};border-radius:8px;'
@@ -409,7 +400,7 @@ if page == "📊 Stock Overview":
                             f'text-transform:uppercase;color:var(--muted);margin-bottom:0.2rem">'
                             f'{item["name"]}</div>'
                             f'<div style="font-family:var(--mono);font-weight:600;font-size:1.05rem;'
-                            f'margin-bottom:0.25rem">{_price_html(item["price"], item["symbol"])}</div>'
+                            f'margin-bottom:0.25rem">{_price_fmt(item["price"])}</div>'
                             f'<div style="display:flex;gap:0.6rem;flex-wrap:wrap">'
                             f'<span style="font-size:0.68rem;color:var(--muted)">1D&nbsp;{_chg_html(chg_1d)}</span>'
                             f'<span style="font-size:0.68rem;color:var(--muted)">1W&nbsp;{_chg_html(item.get("chg_1w"))}</span>'
@@ -417,35 +408,32 @@ if page == "📊 Stock Overview":
                             unsafe_allow_html=True,
                         )
 
-            # 1-Day performance chart
+            # 1-Day performance chart (all except Volatility)
             st.markdown("<div style='height:0.5rem'></div>", unsafe_allow_html=True)
-            chart_items = [i for i in indices if i.get("chg_1d") is not None
-                           and i["region"] not in ("Volatility",)]
+            chart_items = [i for i in indices
+                           if i.get("chg_1d") is not None and i["region"] != "Volatility"]
             if chart_items:
-                chart_items_sorted = sorted(chart_items, key=lambda x: x["chg_1d"])
-                labels = [i["name"] for i in chart_items_sorted]
-                vals   = [i["chg_1d"] * 100 for i in chart_items_sorted]
+                sorted_items = sorted(chart_items, key=lambda x: x["chg_1d"])
+                vals   = [i["chg_1d"] * 100 for i in sorted_items]
                 colors = ["#00C805" if v >= 0 else "#FF3350" for v in vals]
                 fig_idx = go.Figure(go.Bar(
-                    x=vals, y=labels, orientation="h",
+                    x=vals, y=[i["name"] for i in sorted_items], orientation="h",
                     marker_color=colors,
                     text=[f"{v:+.2f}%" for v in vals],
                     textposition="outside",
                     textfont=dict(family="'IBM Plex Mono', monospace", size=10),
                 ))
-                layout_idx = _chart_defaults(height=max(260, len(chart_items_sorted) * 28))
-                layout_idx["margin"] = dict(l=0, r=60, t=30, b=10)
-                fig_idx.update_layout(
-                    title="1-Day Performance (%)",
-                    xaxis_title="%",
-                    **layout_idx,
-                )
+                layout_idx = _chart_defaults(height=max(280, len(sorted_items) * 30))
+                layout_idx["margin"] = dict(l=0, r=70, t=36, b=10)
+                fig_idx.update_layout(title="1-Day Performance (%)", xaxis_title="%", **layout_idx)
                 st.plotly_chart(fig_idx, use_container_width=True)
 
-    st.divider()
 
-    # ── Stock Lookup ──────────────────────────────────────────────────────
-    st.markdown('<div class="sec-lbl">Stock Lookup</div>', unsafe_allow_html=True)
+# ─────────────────────────────────────────────────────────────────────────────
+# PAGE 1 — Stock Overview
+# ─────────────────────────────────────────────────────────────────────────────
+elif page == "📊 Stock Overview":
+    st.title("📊 Stock Overview")
     symbol = st.text_input("Enter ticker symbol (e.g. AAPL, MSFT, NVDA)").strip().upper()
 
     if symbol:
