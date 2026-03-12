@@ -1,10 +1,10 @@
-openai
-streamlit
-yfinance
-pandas
-numpy
-plotly
-python-dotenv
+openai>=1.0,<3.0
+streamlit>=1.30
+yfinance>=0.2.40
+pandas>=2.0
+numpy>=1.24
+plotly>=5.0
+python-dotenv>=1.0
 
 # Optional — ByteDance Ark AK/SK auth (only needed when VOLC_ACCESSKEY/VOLC_SECRETKEY are set)
 # volcenginesdkarkruntime
