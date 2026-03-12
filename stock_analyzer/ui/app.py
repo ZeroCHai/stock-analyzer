@@ -28,7 +28,7 @@ from stock_analyzer.analysis.screener import ScreenerCriteria, screen
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 def _render_news_item(item: dict):
-    """Render one Yahoo Finance news item."""
+    """Render one Yahoo Finance news item as a styled .nc card."""
     title     = item.get("title", "Untitled")
     link      = item.get("link", "")
     publisher = item.get("publisher", "")
@@ -36,17 +36,28 @@ def _render_news_item(item: dict):
     date_str  = datetime.fromtimestamp(ts).strftime("%b %d, %Y") if ts else ""
     tickers   = item.get("relatedTickers", [])
 
-    if link:
-        st.markdown(f"**[{title}]({link})**")
-    else:
-        st.markdown(f"**{title}**")
-    meta = f"_{publisher}_"
-    if date_str:
-        meta += f" · {date_str}"
-    if tickers:
-        meta += f" · {' '.join(tickers[:6])}"
-    st.caption(meta)
-    st.divider()
+    title_html = (f'<a href="{link}" target="_blank" rel="noopener" class="nc-title">{title}</a>'
+                  if link else f'<span class="nc-title">{title}</span>')
+    tags_html  = "".join(f'<span class="nc-tag">{t}</span>' for t in tickers[:5])
+    meta_parts = [p for p in [publisher, date_str] if p]
+    meta_html  = " · ".join(meta_parts) + (f"&nbsp;{tags_html}" if tags_html else "")
+    st.markdown(
+        f'<div class="nc">{title_html}<div class="nc-meta">{meta_html}</div></div>',
+        unsafe_allow_html=True,
+    )
+
+
+def _chart_defaults(height: int = 320) -> dict:
+    """Common dark-theme layout kwargs for all Plotly charts."""
+    return dict(
+        template="plotly_dark",
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(14,20,32,0.6)",
+        font=dict(family="'IBM Plex Mono', monospace", size=11, color="#DDE6ED"),
+        height=height,
+        margin=dict(l=0, r=0, t=40, b=20),
+        legend=dict(bgcolor="rgba(0,0,0,0)", borderwidth=0),
+    )
 
 
 def _bar_chart(data: dict, title: str, pct: bool = False, billions: bool = False) -> "go.Figure":
@@ -61,15 +72,15 @@ def _bar_chart(data: dict, title: str, pct: bool = False, billions: bool = False
         ylabel = "%"
     else:
         ylabel = ""
-    colors = ["#d62728" if v < 0 else "#1f77b4" for v in vals]
+    colors = ["#FF3350" if v < 0 else "#00C805" for v in vals]
     fig = go.Figure(go.Bar(
         x=years, y=vals, marker_color=colors,
         text=[f"{v:.1f}" for v in vals], textposition="outside",
+        textfont=dict(family="'IBM Plex Mono', monospace", size=11),
     ))
     fig.update_layout(
         title=title, yaxis_title=ylabel,
-        template="plotly_white", height=280,
-        margin=dict(l=0, r=0, t=40, b=20),
+        **_chart_defaults(height=280),
     )
     return fig
 
@@ -78,87 +89,215 @@ def _bar_chart(data: dict, title: str, pct: bool = False, billions: bool = False
 init_db()
 st.set_page_config(page_title="Stock Analyzer", page_icon="📈", layout="wide")
 
-# ── Robinhood-style CSS ────────────────────────────────────────────────────────
+# ── Design system: Financial Terminal Dark ────────────────────────────────────
+# Aesthetic direction (frontend-design skill):
+#   "Trading Terminal" — obsidian surfaces, IBM Plex Mono for all numbers,
+#   Syne display headers, electric-green (#00C805) accent, strict data hierarchy.
+# ─────────────────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
+@import url('https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+
+/* ── CSS variables ── */
+:root {
+    --bg:       #080C12;
+    --surface:  #0E1420;
+    --border:   #1A2535;
+    --green:    #00C805;
+    --red:      #FF3350;
+    --blue:     #4C9EFF;
+    --text:     #DDE6ED;
+    --muted:    #4A6070;
+    --mono:     'IBM Plex Mono', monospace;
+    --display:  'Syne', sans-serif;
+    --body:     'DM Sans', sans-serif;
+}
+
+/* ── Global typography ── */
+html, body, [class*="css"], p, li, span, div { font-family: var(--body) !important; }
+h1 { font-family: var(--display) !important; font-weight: 800 !important;
+     font-size: 1.9rem !important; letter-spacing: -0.03em !important;
+     color: var(--text) !important; margin-bottom: 0.1rem !important; }
+h2 { font-family: var(--display) !important; font-weight: 700 !important;
+     font-size: 1.1rem !important; letter-spacing: -0.01em !important; }
+h3 { font-family: var(--display) !important; font-weight: 700 !important;
+     font-size: 0.95rem !important; }
+
 /* ── Buttons ── */
 .stButton > button {
-    background-color: #00C805;
-    color: #000000;
+    background: var(--green);
+    color: #000;
     font-weight: 700;
+    font-size: 0.875rem;
+    letter-spacing: 0.03em;
     border: none;
-    border-radius: 24px;
-    padding: 0.5rem 1.8rem;
-    transition: background-color 0.15s ease;
+    border-radius: 6px;
+    padding: 0.55rem 2rem;
+    transition: all 0.15s ease;
+    box-shadow: 0 0 0 rgba(0,200,5,0);
+    position: relative;
 }
-.stButton > button:hover { background-color: #00A804; color: #000000; }
-.stButton > button:active { background-color: #008F03; color: #000000; }
+.stButton > button:hover {
+    background: #00E306;
+    color: #000;
+    box-shadow: 0 0 18px rgba(0,200,5,0.35);
+    transform: translateY(-1px);
+}
+.stButton > button:active { background: #009A03; transform: translateY(0); }
 
-/* ── Metric labels ── */
-[data-testid="stMetricLabel"] { font-size: 0.75rem; color: #888888; letter-spacing: 0.04em; }
-[data-testid="stMetricValue"] { font-size: 1.35rem; font-weight: 700; }
+/* ── Metric cards ── */
+[data-testid="stMetric"] {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 0.9rem 1.1rem !important;
+    position: relative;
+    overflow: hidden;
+}
+[data-testid="stMetric"]::after {
+    content: '';
+    position: absolute;
+    inset: 0 0 auto 0;
+    height: 2px;
+    background: linear-gradient(90deg, var(--green) 0%, transparent 60%);
+}
+[data-testid="stMetricLabel"] {
+    font-size: 0.62rem !important;
+    color: var(--muted) !important;
+    font-weight: 700 !important;
+    letter-spacing: 0.1em !important;
+    text-transform: uppercase !important;
+}
+[data-testid="stMetricValue"] {
+    font-family: var(--mono) !important;
+    font-size: 1.4rem !important;
+    font-weight: 600 !important;
+}
+[data-testid="stMetricDelta"] { font-family: var(--mono) !important; font-size: 0.78rem !important; }
 
 /* ── Dividers ── */
-hr { border-color: #2A2A32 !important; margin: 0.6rem 0; }
+hr { border: none !important; border-top: 1px solid var(--border) !important; margin: 1rem 0 !important; }
 
 /* ── Tabs ── */
+[data-testid="stTabs"] [data-baseweb="tab-list"] {
+    background: transparent !important;
+    border-bottom: 1px solid var(--border);
+    gap: 0;
+}
 [data-testid="stTabs"] [data-baseweb="tab"] {
-    font-weight: 600;
-    font-size: 0.85rem;
-    letter-spacing: 0.03em;
+    font-weight: 700;
+    font-size: 0.72rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 0.65rem 1.2rem;
+    color: var(--muted);
+    border-radius: 0;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+    transition: color 0.15s;
+}
+[data-testid="stTabs"] [aria-selected="true"] {
+    color: var(--green) !important;
+    border-bottom-color: var(--green) !important;
+    background: transparent !important;
 }
 
 /* ── DataFrame ── */
-[data-testid="stDataFrame"] { border-radius: 8px; }
+[data-testid="stDataFrame"] { border-radius: 8px; overflow: hidden; border: 1px solid var(--border) !important; }
 
-/* ── Sidebar nav ── */
+/* ── Sidebar ── */
+[data-testid="stSidebar"] { background: #050810 !important; border-right: 1px solid var(--border) !important; }
 [data-testid="stSidebar"] .stRadio label {
-    font-size: 1.05rem !important;
-    font-weight: 700 !important;
-    letter-spacing: 0.01em;
+    font-family: var(--body) !important;
+    font-size: 0.88rem !important;
+    font-weight: 500 !important;
+    color: var(--muted) !important;
+    padding: 0.2rem 0;
+    transition: color 0.12s;
 }
+[data-testid="stSidebar"] .stRadio label:hover { color: var(--green) !important; }
 [data-testid="stSidebar"] .stRadio > label {
-    font-size: 0.8rem !important;
-    font-weight: 600 !important;
-    color: #888888 !important;
+    font-size: 0.6rem !important;
+    font-weight: 700 !important;
+    color: #1E2F3E !important;
     text-transform: uppercase;
-    letter-spacing: 0.08em;
+    letter-spacing: 0.12em;
 }
+[data-testid="stSidebar"] hr { border-color: var(--border) !important; }
 
-/* ── Input fields ── */
-[data-testid="stTextInput"] input { border-radius: 8px; }
+/* ── Inputs ── */
+[data-testid="stTextInput"] input,
+[data-testid="stTextArea"] textarea {
+    background: var(--surface) !important;
+    border: 1.5px solid var(--border) !important;
+    border-radius: 8px !important;
+    font-family: var(--mono) !important;
+    font-size: 0.875rem !important;
+    transition: border-color 0.15s, box-shadow 0.15s;
+}
+[data-testid="stTextInput"] input:focus,
+[data-testid="stTextArea"] textarea:focus {
+    border-color: var(--green) !important;
+    box-shadow: 0 0 0 3px rgba(0,200,5,0.1) !important;
+}
 
 /* ── Expander ── */
-[data-testid="stExpander"] summary { font-weight: 600; }
+[data-testid="stExpander"] { border: 1px solid var(--border) !important; border-radius: 10px !important; overflow: hidden; }
+[data-testid="stExpander"] summary { font-weight: 600; font-size: 0.88rem; }
 
-/* ── Save as PDF button ── */
-.pdf-btn {
-    position: fixed;
-    top: 14px;
-    right: 16px;
-    z-index: 9999;
-    background-color: #1f77b4;
-    color: #ffffff;
-    font-weight: 700;
-    font-size: 0.8rem;
-    border: none;
-    border-radius: 20px;
-    padding: 0.4rem 1.1rem;
-    cursor: pointer;
-    box-shadow: 0 2px 6px rgba(0,0,0,0.25);
-    transition: background-color 0.15s ease;
+/* ── Alerts ── */
+[data-testid="stAlert"] { border-radius: 8px; font-size: 0.875rem; }
+
+/* ── Caption ── */
+[data-testid="stCaptionContainer"] { color: var(--muted) !important; font-size: 0.8rem !important; }
+
+/* ── News card ── */
+.nc {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--green);
+    border-radius: 0 8px 8px 0;
+    padding: 0.85rem 1.1rem;
+    margin-bottom: 0.6rem;
+    transition: border-color 0.15s, box-shadow 0.15s;
 }
-.pdf-btn:hover { background-color: #1560a0; }
+.nc:hover { border-color: #2A3F50; box-shadow: 0 4px 20px rgba(0,0,0,0.4); }
+.nc-title { font-weight: 600; font-size: 0.9rem; line-height: 1.45;
+            color: var(--text); margin-bottom: 0.3rem; display: block; }
+.nc-title a { color: var(--text); text-decoration: none; }
+.nc-title a:hover { color: var(--green); }
+.nc-meta { font-size: 0.73rem; color: var(--muted); display: flex; gap: 5px; flex-wrap: wrap; align-items: center; }
+.nc-tag { display: inline-block; background: rgba(0,200,5,0.08); color: var(--green);
+          border: 1px solid rgba(0,200,5,0.2); border-radius: 3px; padding: 1px 5px;
+          font-size: 0.66rem; font-weight: 700; font-family: var(--mono); letter-spacing: 0.02em; }
 
-/* ── Print styles ── */
+/* ── Company header ── */
+.co-sym  { font-family: var(--mono); font-size: 0.68rem; font-weight: 600; color: var(--green);
+           letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 0.2rem; }
+.co-name { font-family: var(--display); font-size: 1.6rem; font-weight: 800;
+           letter-spacing: -0.025em; line-height: 1.15; margin-bottom: 0.3rem; }
+.co-meta { font-size: 0.78rem; color: var(--muted); }
+
+/* ── Section label ── */
+.sec-lbl { font-size: 0.6rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.12em;
+           color: var(--muted); padding-bottom: 0.5rem; border-bottom: 1px solid var(--border);
+           margin-bottom: 0.75rem; }
+
+/* ── PDF button ── */
+.pdf-btn {
+    position: fixed; top: 14px; right: 16px; z-index: 9999;
+    background: rgba(0,200,5,0.1); color: var(--green);
+    font-weight: 700; font-size: 0.72rem; letter-spacing: 0.05em;
+    border: 1px solid rgba(0,200,5,0.25); border-radius: 20px;
+    padding: 0.32rem 0.9rem; cursor: pointer; backdrop-filter: blur(8px);
+    transition: all 0.15s ease;
+}
+.pdf-btn:hover { background: rgba(0,200,5,0.2); box-shadow: 0 0 14px rgba(0,200,5,0.25); }
+
+/* ── Print ── */
 @media print {
-    .pdf-btn { display: none !important; }
-    [data-testid="stSidebar"] { display: none !important; }
-    [data-testid="stToolbar"] { display: none !important; }
-    header { display: none !important; }
-    footer { display: none !important; }
-    .stDeployButton { display: none !important; }
-    [data-testid="stDecoration"] { display: none !important; }
+    .pdf-btn, [data-testid="stSidebar"], [data-testid="stToolbar"],
+    header, footer, .stDeployButton, [data-testid="stDecoration"] { display: none !important; }
     .main .block-container { padding: 1rem !important; max-width: 100% !important; }
 }
 </style>
@@ -224,8 +363,15 @@ if page == "📊 Stock Overview":
         # Header
         col1, col2, col3 = st.columns([3, 1, 1])
         with col1:
-            st.subheader(info.get("longName", symbol))
-            st.caption(f"{info.get('sector','')} · {info.get('industry','')}")
+            sector_str   = info.get("sector", "")
+            industry_str = info.get("industry", "")
+            meta_parts   = [p for p in [sector_str, industry_str] if p]
+            st.markdown(
+                f'<div class="co-sym">{symbol}</div>'
+                f'<div class="co-name">{info.get("longName", symbol)}</div>'
+                f'<div class="co-meta">{" · ".join(meta_parts)}</div>',
+                unsafe_allow_html=True,
+            )
         with col2:
             price = metrics.get("current_price")
             st.metric("Price", f"${price:.2f}" if price else "N/A")
@@ -310,7 +456,7 @@ if page == "📊 Stock Overview":
                         "operating_margin_hist": "Operating Margin",
                         "net_margin_hist": "Net Margin",
                     }
-                    colors_m = ["#2ca02c", "#ff7f0e", "#1f77b4"]
+                    colors_m = ["#00C805", "#4C9EFF", "#FF3350"]
                     for (key, label), color in zip(margin_labels.items(), colors_m):
                         d = hist.get(key, {})
                         if d:
@@ -318,12 +464,12 @@ if page == "📊 Stock Overview":
                             fig_m.add_trace(go.Scatter(
                                 x=yrs, y=[d[y] * 100 for y in yrs],
                                 mode="lines+markers", name=label,
-                                line=dict(color=color),
+                                line=dict(color=color, width=2),
+                                marker=dict(size=6),
                             ))
                     fig_m.update_layout(
                         title="Margin Trends (%)", yaxis_title="%",
-                        template="plotly_white", height=280,
-                        margin=dict(l=0, r=0, t=40, b=20),
+                        **_chart_defaults(height=280),
                     )
                     st.plotly_chart(fig_m, use_container_width=True)
                 if hist.get("roe_hist"):
@@ -341,13 +487,13 @@ if page == "📊 Stock Overview":
             fig.add_trace(go.Scatter(
                 x=hist.index, y=hist["Close"],
                 mode="lines", name="Close",
-                line=dict(color="#1f77b4", width=2)
+                line=dict(color="#00C805", width=2),
+                fill="tozeroy",
+                fillcolor="rgba(0,200,5,0.06)",
             ))
-            fig.update_layout(
-                xaxis_title="Date", yaxis_title="Price (USD)",
-                template="plotly_white", height=350,
-                margin=dict(l=0, r=0, t=20, b=0),
-            )
+            layout = _chart_defaults(height=350)
+            layout["margin"] = dict(l=0, r=0, t=20, b=0)
+            fig.update_layout(xaxis_title="Date", yaxis_title="Price (USD)", **layout)
             st.plotly_chart(fig, use_container_width=True)
 
         # Business summary
@@ -453,9 +599,15 @@ elif page == "📑 Financial Analysis":
                 st.stop()
 
         company_name = info.get("longName", symbol)
-        sector       = info.get("sector", "N/A")
-        st.subheader(company_name)
-        st.caption(f"{sector} · {info.get('industry', '')}")
+        sector_str   = info.get("sector", "")
+        industry_str = info.get("industry", "")
+        meta_parts   = [p for p in [sector_str, industry_str] if p]
+        st.markdown(
+            f'<div class="co-sym">{symbol}</div>'
+            f'<div class="co-name">{company_name}</div>'
+            f'<div class="co-meta">{" · ".join(meta_parts)}</div>',
+            unsafe_allow_html=True,
+        )
 
         has_hist = any(v for v in hist.values())
         if not has_hist:
@@ -540,18 +692,18 @@ elif page == "📑 Financial Analysis":
             if margin_data:
                 fig_m = go.Figure()
                 mlabels = {"gross_margin_hist": "Gross", "operating_margin_hist": "Operating", "net_margin_hist": "Net"}
-                mcolors = ["#2ca02c", "#ff7f0e", "#1f77b4"]
+                mcolors = ["#00C805", "#4C9EFF", "#FF3350"]
                 for (k, lbl), col in zip(mlabels.items(), mcolors):
                     d = margin_data.get(k, {})
                     if d:
                         yrs = sorted(d.keys())
                         fig_m.add_trace(go.Scatter(
                             x=yrs, y=[d[y]*100 for y in yrs],
-                            mode="lines+markers", name=lbl, line=dict(color=col),
+                            mode="lines+markers", name=lbl,
+                            line=dict(color=col, width=2), marker=dict(size=6),
                         ))
                 fig_m.update_layout(title="Margins (%)", yaxis_title="%",
-                                    template="plotly_white", height=280,
-                                    margin=dict(l=0, r=0, t=40, b=20))
+                                    **_chart_defaults(height=280))
                 st.plotly_chart(fig_m, use_container_width=True)
 
 
@@ -574,11 +726,15 @@ elif page == "📰 Stock News":
                 st.stop()
 
         company_name = info.get("longName", symbol)
-        sector       = info.get("sector", "N/A")
-        industry     = info.get("industry", "N/A")
-
-        st.subheader(company_name)
-        st.caption(f"{sector} · {industry}")
+        sector_str   = info.get("sector", "")
+        industry_str = info.get("industry", "")
+        meta_parts   = [p for p in [sector_str, industry_str] if p]
+        st.markdown(
+            f'<div class="co-sym">{symbol}</div>'
+            f'<div class="co-name">{company_name}</div>'
+            f'<div class="co-meta">{" · ".join(meta_parts)}</div>',
+            unsafe_allow_html=True,
+        )
         st.divider()
 
         if not stock_news:
@@ -619,13 +775,13 @@ elif page == "🏭 Sector Markets":
                     text=[f"{v*100:+.2f}%" if v is not None else "N/A" for v in df_s["1D %"]],
                     textposition="outside",
                 ))
+                layout_sec = _chart_defaults(height=420)
+                layout_sec["margin"] = dict(l=0, r=0, t=40, b=110)
+                layout_sec["xaxis_tickangle"] = -30
                 fig_sec.update_layout(
                     title="Sector 1-Day Performance (%)",
                     yaxis_title="Change (%)",
-                    template="plotly_white",
-                    height=420,
-                    margin=dict(l=0, r=0, t=40, b=110),
-                    xaxis_tickangle=-30,
+                    **layout_sec,
                 )
                 st.plotly_chart(fig_sec, use_container_width=True)
 
@@ -733,11 +889,9 @@ elif page == "⚖️ Compare":
                     x=hist.index, y=normalised,
                     mode="lines", name=sym,
                 ))
-        fig.update_layout(
-            yaxis_title="Indexed Price (base=100)",
-            template="plotly_white", height=350,
-            margin=dict(l=0, r=0, t=20, b=0),
-        )
+        layout_cmp = _chart_defaults(height=350)
+        layout_cmp["margin"] = dict(l=0, r=0, t=20, b=0)
+        fig.update_layout(yaxis_title="Indexed Price (base=100)", **layout_cmp)
         st.plotly_chart(fig, use_container_width=True)
 
 
@@ -765,8 +919,15 @@ elif page == "📈 Technical Analysis":
             st.stop()
 
         company_name = info.get("longName", symbol)
-        st.subheader(company_name)
-        st.caption(f"{info.get('sector','')} · {info.get('industry','')}")
+        sector_str   = info.get("sector", "")
+        industry_str = info.get("industry", "")
+        meta_parts   = [p for p in [sector_str, industry_str] if p]
+        st.markdown(
+            f'<div class="co-sym">{symbol}</div>'
+            f'<div class="co-name">{company_name}</div>'
+            f'<div class="co-meta">{" · ".join(meta_parts)}</div>',
+            unsafe_allow_html=True,
+        )
 
         # ── Compute indicators ─────────────────────────────────────────────
         df = df.copy()
@@ -871,12 +1032,11 @@ elif page == "📈 Technical Analysis":
                 marker_color=vol_colors, showlegend=False,
             ), row=2, col=1)
 
-            fig.update_layout(
-                xaxis_rangeslider_visible=False,
-                template="plotly_white", height=620,
-                margin=dict(l=0, r=0, t=30, b=0),
-                legend=dict(orientation="h", yanchor="bottom", y=1.01, x=0),
-            )
+            layout_ta = _chart_defaults(height=620)
+            layout_ta["margin"] = dict(l=0, r=0, t=30, b=0)
+            layout_ta["legend"] = dict(orientation="h", yanchor="bottom", y=1.01, x=0,
+                                       bgcolor="rgba(0,0,0,0)", borderwidth=0)
+            fig.update_layout(xaxis_rangeslider_visible=False, **layout_ta)
             fig.update_yaxes(title_text="Price (USD)", row=1, col=1)
             fig.update_yaxes(title_text="Volume", row=2, col=1)
             st.plotly_chart(fig, use_container_width=True)
@@ -892,11 +1052,10 @@ elif page == "📈 Technical Analysis":
             fig_rsi.add_hline(y=30, line_dash="dash", line_color="green",
                                annotation_text="超卖 30", annotation_position="right")
             fig_rsi.add_hline(y=50, line_dash="dot", line_color="#999999")
-            fig_rsi.update_layout(
-                title="RSI (14)", yaxis_title="RSI", yaxis_range=[0, 100],
-                template="plotly_white", height=350,
-                margin=dict(l=0, r=0, t=40, b=0),
-            )
+            layout_rsi = _chart_defaults(height=350)
+            layout_rsi["margin"] = dict(l=0, r=0, t=40, b=0)
+            fig_rsi.update_layout(title="RSI (14)", yaxis_title="RSI",
+                                  yaxis_range=[0, 100], **layout_rsi)
             st.plotly_chart(fig_rsi, use_container_width=True)
 
         with tab3:
@@ -917,11 +1076,10 @@ elif page == "📈 Technical Analysis":
                 x=df.index, y=df["Signal"], name="Signal",
                 line=dict(color="#f5a623", width=1.5),
             ))
-            fig_macd.update_layout(
-                title="MACD (12, 26, 9)", yaxis_title="Value",
-                template="plotly_white", height=350,
-                margin=dict(l=0, r=0, t=40, b=0),
-            )
+            layout_macd = _chart_defaults(height=350)
+            layout_macd["margin"] = dict(l=0, r=0, t=40, b=0)
+            fig_macd.update_layout(title="MACD (12, 26, 9)", yaxis_title="Value",
+                                   **layout_macd)
             st.plotly_chart(fig_macd, use_container_width=True)
 
 
