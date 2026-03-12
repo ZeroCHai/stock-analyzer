@@ -114,6 +114,34 @@ def _format_metrics(info: dict) -> str:
     return "\n".join(lines)
 
 
+def _chat_stream(client, model: str, messages: list, max_tokens: int = 4096):
+    """
+    Yield text chunks from a chat completion.
+
+    openai 2.x automatically appends stream_options={"include_usage": true} to
+    streaming requests.  Several OpenAI-compatible endpoints (e.g. ByteDance Ark)
+    reject unknown fields with HTTP 400.  We catch BadRequestError and fall back
+    to a non-streaming call so the response still arrives — just all at once.
+    """
+    import openai as _openai
+
+    try:
+        stream = client.chat.completions.create(
+            model=model, max_tokens=max_tokens, stream=True, messages=messages,
+        )
+        for chunk in stream:
+            content = chunk.choices[0].delta.content
+            if content:
+                yield content
+    except _openai.BadRequestError:
+        response = client.chat.completions.create(
+            model=model, max_tokens=max_tokens, stream=False, messages=messages,
+        )
+        text = response.choices[0].message.content
+        if text:
+            yield text
+
+
 SYSTEM_PROMPT = """You are a senior equity analyst specialising in US stocks.
 You combine quantitative rigor with clear, direct communication.
 When given fundamental data, you:
@@ -131,25 +159,16 @@ def analyze_stock_stream(info: dict):
     client = _get_client()
     prompt = _format_metrics(info)
 
-    stream = client.chat.completions.create(
-        model=_effective_model(),
-        max_tokens=4096,
-        stream=True,
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {
-                "role": "user",
-                "content": (
-                    "Please provide a comprehensive fundamental analysis "
-                    "of the following stock:\n\n" + prompt
-                ),
-            },
-        ],
-    )
-    for chunk in stream:
-        content = chunk.choices[0].delta.content
-        if content:
-            yield content
+    yield from _chat_stream(client, _effective_model(), max_tokens=4096, messages=[
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {
+            "role": "user",
+            "content": (
+                "Please provide a comprehensive fundamental analysis "
+                "of the following stock:\n\n" + prompt
+            ),
+        },
+    ])
 
 
 def analyze_financials_stream(symbol: str, company_name: str, sector: str, hist: dict):
@@ -197,29 +216,20 @@ def analyze_financials_stream(symbol: str, company_name: str, sector: str, hist:
 
     prompt = "\n".join(lines)
 
-    stream = client.chat.completions.create(
-        model=_effective_model(),
-        max_tokens=4096,
-        stream=True,
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {
-                "role": "user",
-                "content": (
-                    "Analyze the 3-year financial trends below. For each key area:\n"
-                    "1. Describe the trend (improving / declining / stable)\n"
-                    "2. Identify the likely drivers behind significant changes\n"
-                    "3. Highlight any red flags or notable strengths\n"
-                    "4. Provide an overall assessment of financial health trajectory\n\n"
-                    + prompt
-                ),
-            },
-        ],
-    )
-    for chunk in stream:
-        content = chunk.choices[0].delta.content
-        if content:
-            yield content
+    yield from _chat_stream(client, _effective_model(), max_tokens=4096, messages=[
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {
+            "role": "user",
+            "content": (
+                "Analyze the 3-year financial trends below. For each key area:\n"
+                "1. Describe the trend (improving / declining / stable)\n"
+                "2. Identify the likely drivers behind significant changes\n"
+                "3. Highlight any red flags or notable strengths\n"
+                "4. Provide an overall assessment of financial health trajectory\n\n"
+                + prompt
+            ),
+        },
+    ])
 
 
 def analyze_stock_news_stream(symbol: str, company_name: str, sector: str, news_items: list):
@@ -244,29 +254,20 @@ def analyze_stock_news_stream(symbol: str, company_name: str, sector: str, news_
         date_str = datetime.fromtimestamp(ts).strftime("%Y-%m-%d") if ts else ""
         lines.append(f"  [{date_str}] {title}  ({publisher})")
 
-    stream = client.chat.completions.create(
-        model=_effective_model(),
-        max_tokens=2048,
-        stream=True,
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {
-                "role": "user",
-                "content": (
-                    "Based on the following recent news headlines for this stock:\n"
-                    "1. Summarize the key news themes and material events\n"
-                    "2. Assess the likely impact on the stock (positive / negative / neutral) and why\n"
-                    "3. Identify significant near-term risks or catalysts\n"
-                    "4. Give an overall news sentiment assessment\n\n"
-                    + "\n".join(lines)
-                ),
-            },
-        ],
-    )
-    for chunk in stream:
-        content = chunk.choices[0].delta.content
-        if content:
-            yield content
+    yield from _chat_stream(client, _effective_model(), max_tokens=2048, messages=[
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {
+            "role": "user",
+            "content": (
+                "Based on the following recent news headlines for this stock:\n"
+                "1. Summarize the key news themes and material events\n"
+                "2. Assess the likely impact on the stock (positive / negative / neutral) and why\n"
+                "3. Identify significant near-term risks or catalysts\n"
+                "4. Give an overall news sentiment assessment\n\n"
+                + "\n".join(lines)
+            ),
+        },
+    ])
 
 
 def analyze_industry_stream(
@@ -304,31 +305,22 @@ def analyze_industry_stream(
         ticker_tag = f"[{', '.join(tickers[:4])}]" if tickers else ""
         lines.append(f"  [{date_str}] {ticker_tag} {title}  ({publisher})")
 
-    stream = client.chat.completions.create(
-        model=_effective_model(),
-        max_tokens=2048,
-        stream=True,
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {
-                "role": "user",
-                "content": (
-                    "The following headlines were collected from major peers in the sector "
-                    f"({peers_str}). Based on this competitive intelligence:\n"
-                    "1. Identify the dominant industry themes and macro trends\n"
-                    "2. Assess competitive dynamics and any shifts in market structure\n"
-                    "3. Highlight major sector-wide opportunities and threats\n"
-                    "4. Evaluate the specific implications for the company mentioned above\n"
-                    "5. Provide an overall industry outlook (bullish / neutral / bearish)\n\n"
-                    + "\n".join(lines)
-                ),
-            },
-        ],
-    )
-    for chunk in stream:
-        content = chunk.choices[0].delta.content
-        if content:
-            yield content
+    yield from _chat_stream(client, _effective_model(), max_tokens=2048, messages=[
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {
+            "role": "user",
+            "content": (
+                "The following headlines were collected from major peers in the sector "
+                f"({peers_str}). Based on this competitive intelligence:\n"
+                "1. Identify the dominant industry themes and macro trends\n"
+                "2. Assess competitive dynamics and any shifts in market structure\n"
+                "3. Highlight major sector-wide opportunities and threats\n"
+                "4. Evaluate the specific implications for the company mentioned above\n"
+                "5. Provide an overall industry outlook (bullish / neutral / bearish)\n\n"
+                + "\n".join(lines)
+            ),
+        },
+    ])
 
 
 _TA_SYSTEM = """You are a professional technical analyst specialising in price action and momentum.
@@ -429,25 +421,16 @@ def analyze_technicals_stream(symbol: str, company_name: str, df, info: dict | N
         f"Latest vs 20-day avg: {f'{vol_ratio:.2f}x' if vol_ratio else 'N/A'}",
     ]
 
-    stream = client.chat.completions.create(
-        model=_effective_model(),
-        max_tokens=2048,
-        stream=True,
-        messages=[
-            {"role": "system", "content": _TA_SYSTEM},
-            {
-                "role": "user",
-                "content": (
-                    "Generate a trading idea based on the following technical data:\n\n"
-                    + "\n".join(l for l in lines if l is not None)
-                ),
-            },
-        ],
-    )
-    for chunk in stream:
-        content = chunk.choices[0].delta.content
-        if content:
-            yield content
+    yield from _chat_stream(client, _effective_model(), max_tokens=2048, messages=[
+        {"role": "system", "content": _TA_SYSTEM},
+        {
+            "role": "user",
+            "content": (
+                "Generate a trading idea based on the following technical data:\n\n"
+                + "\n".join(l for l in lines if l is not None)
+            ),
+        },
+    ])
 
 
 def compare_stocks_stream(infos: list[dict]):
@@ -463,23 +446,14 @@ def compare_stocks_stream(infos: list[dict]):
 
     combined = "\n\n" + ("=" * 60 + "\n").join(blocks)
 
-    stream = client.chat.completions.create(
-        model=_effective_model(),
-        max_tokens=4096,
-        stream=True,
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {
-                "role": "user",
-                "content": (
-                    "Compare these stocks side-by-side. "
-                    "Which offers the best risk/reward and why?\n\n"
-                    + combined
-                ),
-            },
-        ],
-    )
-    for chunk in stream:
-        content = chunk.choices[0].delta.content
-        if content:
-            yield content
+    yield from _chat_stream(client, _effective_model(), max_tokens=4096, messages=[
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {
+            "role": "user",
+            "content": (
+                "Compare these stocks side-by-side. "
+                "Which offers the best risk/reward and why?\n\n"
+                + combined
+            ),
+        },
+    ])
