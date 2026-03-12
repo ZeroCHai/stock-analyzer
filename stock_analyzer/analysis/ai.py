@@ -38,6 +38,32 @@ def _make_vertex_client() -> tuple:
     return OpenAI(api_key=creds.token, base_url=base_url), time.time() + 3600
 
 
+def _make_ark_client():
+    """
+    Build an OpenAI client for ARK with an httpx hook that strips fields
+    added by openai 2.x (store, stream_options, etc.) which ARK rejects.
+    """
+    import httpx
+    import json as _json
+
+    _STRIP = frozenset(["store", "stream_options", "service_tier"])
+
+    def _on_request(request: httpx.Request) -> None:
+        try:
+            body = _json.loads(request.content)
+            if any(f in body for f in _STRIP):
+                for f in _STRIP:
+                    body.pop(f, None)
+                new_bytes = _json.dumps(body).encode()
+                request._content = new_bytes  # noqa: SLF001
+                request.headers["content-length"] = str(len(new_bytes))
+        except Exception:
+            pass
+
+    http_client = httpx.Client(event_hooks={"request": [_on_request]})
+    return OpenAI(api_key=ARK_API_KEY, base_url=ARK_BASE_URL, http_client=http_client)
+
+
 def _get_client():
     """
     Return the appropriate AI client based on AI_PROVIDER.
@@ -53,7 +79,7 @@ def _get_client():
                 from volcenginesdkarkruntime import Ark
                 _client = Ark(ak=VOLC_AK, sk=VOLC_SK)
             else:
-                _client = OpenAI(api_key=ARK_API_KEY, base_url=ARK_BASE_URL)
+                _client = _make_ark_client()
         return _client
 
     # Gemini — Vertex AI OAuth
