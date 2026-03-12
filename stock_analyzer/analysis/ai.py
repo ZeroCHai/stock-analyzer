@@ -38,6 +38,46 @@ def _make_vertex_client() -> tuple:
     return OpenAI(api_key=creds.token, base_url=base_url), time.time() + 3600
 
 
+def _patch_ark_send(client) -> None:
+    """
+    Monkeypatch the internal httpx.Client.send on an Ark SDK client so that
+    openai 2.x fields (store, stream_options, service_tier) are stripped from
+    the request body before the bytes hit the network.
+
+    This runs AFTER auth headers are injected by the Ark SDK, so auth is
+    unaffected.  ARK uses Bearer-token auth (not body-signing), so modifying
+    the body after the auth header is added is safe.
+    """
+    import httpx as _httpx
+    import json as _json
+
+    _STRIP = frozenset(["store", "stream_options", "service_tier"])
+    _orig = client._client.send  # openai SyncAPIClient stores httpx as _client
+
+    def _send(request: _httpx.Request, **kwargs):
+        try:
+            body = _json.loads(request.content)
+            if any(f in body for f in _STRIP):
+                for f in _STRIP:
+                    body.pop(f, None)
+                new_bytes = _json.dumps(body).encode()
+                # Rebuild request preserving all existing headers (incl. auth)
+                hdrs = [(k, v) for k, v in request.headers.items()
+                        if k.lower() != "content-length"]
+                hdrs.append(("content-length", str(len(new_bytes))))
+                request = _httpx.Request(
+                    method=request.method,
+                    url=str(request.url),
+                    headers=hdrs,
+                    content=new_bytes,
+                )
+        except Exception:
+            pass
+        return _orig(request, **kwargs)
+
+    client._client.send = _send
+
+
 def _ark_direct_stream(model: str, messages: list, max_tokens: int):
     """
     Call the ARK API directly via requests, completely bypassing the openai SDK.
@@ -90,13 +130,18 @@ def _get_client():
     global _client, _oauth_expires_at
 
     if AI_PROVIDER == "ark":
+        # Prefer ARK_API_KEY: use direct HTTP, bypassing openai SDK entirely.
+        if ARK_API_KEY:
+            return None
+        # Fallback: AK/SK via volcenginesdkarkruntime, with send-level patch
+        # to strip openai 2.x fields (store, stream_options, service_tier).
         if VOLC_AK and VOLC_SK:
             if _client is None:
                 from volcenginesdkarkruntime import Ark
                 _client = Ark(ak=VOLC_AK, sk=VOLC_SK)
+                _patch_ark_send(_client)
             return _client
-        # API-key path: use direct HTTP, no SDK client needed
-        return None
+        return None  # misconfigured — will raise in _effective_model()
 
     # Gemini — Vertex AI OAuth
     if GCP_PROJECT:
