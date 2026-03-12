@@ -38,49 +38,65 @@ def _make_vertex_client() -> tuple:
     return OpenAI(api_key=creds.token, base_url=base_url), time.time() + 3600
 
 
-def _make_ark_client():
+def _ark_direct_stream(model: str, messages: list, max_tokens: int):
     """
-    Build an OpenAI client for ARK with an httpx hook that strips fields
-    added by openai 2.x (store, stream_options, etc.) which ARK rejects.
+    Call the ARK API directly via requests, completely bypassing the openai SDK.
+    This avoids the openai 2.x SDK injecting fields (store, stream_options,
+    service_tier) that ARK rejects with HTTP 400.
     """
-    import httpx
+    import requests
     import json as _json
 
-    _STRIP = frozenset(["store", "stream_options", "service_tier"])
+    url = f"{ARK_BASE_URL}/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {ARK_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": model,
+        "messages": messages,
+        "max_tokens": max_tokens,
+        "stream": True,
+    }
 
-    def _on_request(request: httpx.Request) -> None:
-        try:
-            body = _json.loads(request.content)
-            if any(f in body for f in _STRIP):
-                for f in _STRIP:
-                    body.pop(f, None)
-                new_bytes = _json.dumps(body).encode()
-                request._content = new_bytes  # noqa: SLF001
-                request.headers["content-length"] = str(len(new_bytes))
-        except Exception:
-            pass
-
-    http_client = httpx.Client(event_hooks={"request": [_on_request]})
-    return OpenAI(api_key=ARK_API_KEY, base_url=ARK_BASE_URL, http_client=http_client)
+    with requests.post(url, headers=headers, json=payload, stream=True, timeout=180) as resp:
+        resp.raise_for_status()
+        for raw_line in resp.iter_lines():
+            if not raw_line:
+                continue
+            line = raw_line.decode("utf-8") if isinstance(raw_line, bytes) else raw_line
+            if not line.startswith("data: "):
+                continue
+            data = line[6:]
+            if data.strip() == "[DONE]":
+                break
+            try:
+                chunk = _json.loads(data)
+                content = chunk["choices"][0]["delta"].get("content")
+                if content:
+                    yield content
+            except (KeyError, IndexError, _json.JSONDecodeError):
+                pass
 
 
 def _get_client():
     """
     Return the appropriate AI client based on AI_PROVIDER.
 
-    Ark  (default): AK/SK → API key
+    Ark  (default): AK/SK → volcenginesdkarkruntime Ark client
+                    API key → None (direct HTTP via _ark_direct_stream)
     Gemini:         Vertex AI OAuth → API key
     """
     global _client, _oauth_expires_at
 
     if AI_PROVIDER == "ark":
-        if _client is None:
-            if VOLC_AK and VOLC_SK:
+        if VOLC_AK and VOLC_SK:
+            if _client is None:
                 from volcenginesdkarkruntime import Ark
                 _client = Ark(ak=VOLC_AK, sk=VOLC_SK)
-            else:
-                _client = _make_ark_client()
-        return _client
+            return _client
+        # API-key path: use direct HTTP, no SDK client needed
+        return None
 
     # Gemini — Vertex AI OAuth
     if GCP_PROJECT:
@@ -144,28 +160,22 @@ def _chat_stream(client, model: str, messages: list, max_tokens: int = 4096):
     """
     Yield text chunks from a chat completion.
 
-    openai 2.x automatically appends stream_options={"include_usage": true} to
-    streaming requests.  Several OpenAI-compatible endpoints (e.g. ByteDance Ark)
-    reject unknown fields with HTTP 400.  We catch BadRequestError and fall back
-    to a non-streaming call so the response still arrives — just all at once.
+    For ARK with API-key auth, client is None and we call _ark_direct_stream()
+    directly via requests, bypassing the openai SDK entirely (which in 2.x
+    injects fields like store/stream_options/service_tier that ARK rejects).
     """
-    import openai as _openai
+    if client is None:
+        # ARK API-key path: direct HTTP
+        yield from _ark_direct_stream(model, messages, max_tokens)
+        return
 
-    try:
-        stream = client.chat.completions.create(
-            model=model, max_tokens=max_tokens, stream=True, messages=messages,
-        )
-        for chunk in stream:
-            content = chunk.choices[0].delta.content
-            if content:
-                yield content
-    except _openai.BadRequestError:
-        response = client.chat.completions.create(
-            model=model, max_tokens=max_tokens, stream=False, messages=messages,
-        )
-        text = response.choices[0].message.content
-        if text:
-            yield text
+    stream = client.chat.completions.create(
+        model=model, max_tokens=max_tokens, stream=True, messages=messages,
+    )
+    for chunk in stream:
+        content = chunk.choices[0].delta.content
+        if content:
+            yield content
 
 
 SYSTEM_PROMPT = """You are a senior equity analyst specialising in US stocks.
