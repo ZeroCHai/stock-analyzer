@@ -17,18 +17,14 @@ from stock_analyzer.data.db import init_db
 from stock_analyzer.data.ingestion.yfinance_client import (
     fetch_stock, fetch_price_history, set_demo_mode, is_demo_mode,
     fetch_income_statement, fetch_balance_sheet, fetch_cash_flow,
-    fetch_news, fetch_industry_news, SECTOR_ETF,
-    fetch_sector_peers_news, fetch_peers_news_by_list, SECTOR_PEERS,
+    fetch_news, SECTOR_ETF,
+    fetch_sector_performance, fetch_sector_details, fetch_prediction_markets,
 )
 from stock_analyzer.data.ingestion.demo_data import DEMO_STOCKS
 from stock_analyzer.analysis.fundamental import (
     extract_metrics, score_health, METRIC_LABELS, extract_historical_metrics,
 )
 from stock_analyzer.analysis.screener import ScreenerCriteria, screen
-from stock_analyzer.analysis.ai import (
-    analyze_stock_stream, compare_stocks_stream, analyze_financials_stream,
-    analyze_stock_news_stream, analyze_industry_stream, analyze_technicals_stream,
-)
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 def _render_news_item(item: dict):
@@ -202,8 +198,9 @@ st.sidebar.divider()
 # ── Sidebar navigation ────────────────────────────────────────────────────────
 page = st.sidebar.radio(
     "Navigation",
-    ["📊 Stock Overview", "🔍 Screener", "🤖 AI Analysis", "📑 Financial Analysis",
-     "📰 Stock News", "🏭 Industry", "⚖️ Compare", "📈 Technical Analysis"],
+    ["📊 Stock Overview", "🔍 Screener", "📑 Financial Analysis",
+     "📰 Stock News", "🏭 Sector Markets", "⚖️ Compare", "📈 Technical Analysis",
+     "🎯 Prediction Markets"],
 )
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -435,40 +432,11 @@ elif page == "🔍 Screener":
             st.dataframe(df, hide_index=True, use_container_width=True)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# PAGE 3 — AI Analysis
-# ─────────────────────────────────────────────────────────────────────────────
-elif page == "🤖 AI Analysis":
-    st.title("🤖 AI Fundamental Analysis")
-    st.caption("Powered by Ark Seed 2.0.")
-
-    symbol = st.text_input("Ticker symbol").strip().upper()
-
-    if symbol and st.button("Generate Report", type="primary"):
-        with st.spinner(f"Fetching {symbol}…"):
-            try:
-                info = fetch_stock(symbol)
-            except Exception as e:
-                st.error(str(e))
-                st.stop()
-
-        st.subheader(f"Analysis: {info.get('longName', symbol)}")
-        report_area = st.empty()
-        full_text = ""
-
-        with st.spinner("Claude is thinking…"):
-            for chunk in analyze_stock_stream(info):
-                full_text += chunk
-                report_area.markdown(full_text + "▌")
-
-        report_area.markdown(full_text)
-        st.success("Report complete.")
-
-# ─────────────────────────────────────────────────────────────────────────────
-# PAGE 4 — Financial Analysis
+# PAGE 3 — Financial Analysis
 # ─────────────────────────────────────────────────────────────────────────────
 elif page == "📑 Financial Analysis":
     st.title("📑 Financial Analysis")
-    st.caption("3-year financial statements and AI-powered trend analysis for a single stock.")
+    st.caption("3-year financial statements for a single stock.")
 
     symbol = st.text_input("Ticker symbol", key="fin_ticker").strip().upper()
 
@@ -586,27 +554,13 @@ elif page == "📑 Financial Analysis":
                                     margin=dict(l=0, r=0, t=40, b=20))
                 st.plotly_chart(fig_m, use_container_width=True)
 
-        # ── AI Financial Analysis ─────────────────────────────────────────
-        st.subheader("AI Financial Trend Analysis")
-        st.caption("Powered by AI — analyzing key drivers of change across the 3-year period.")
-        report_area = st.empty()
-        full_text = ""
-
-        with st.spinner("Analyzing financial trends…"):
-            for chunk in analyze_financials_stream(symbol, company_name, sector, hist):
-                full_text += chunk
-                report_area.markdown(full_text + "▌")
-
-        report_area.markdown(full_text)
-        st.success("Analysis complete.")
-
 
 # ─────────────────────────────────────────────────────────────────────────────
-# PAGE 5 — Stock News
+# PAGE 4 — Stock News
 # ─────────────────────────────────────────────────────────────────────────────
 elif page == "📰 Stock News":
     st.title("📰 Stock News")
-    st.caption("Recent headlines for a single stock with AI-powered sentiment analysis.")
+    st.caption("Recent headlines for a single stock.")
 
     symbol = st.text_input("Ticker symbol", key="news_ticker").strip().upper()
 
@@ -634,77 +588,81 @@ elif page == "📰 Stock News":
             for item in stock_news:
                 _render_news_item(item)
 
-            st.subheader("AI News Analysis")
-            st.caption("Summarizing key themes and stock impact…")
-            news_area = st.empty()
-            full_news = ""
-            for chunk in analyze_stock_news_stream(symbol, company_name, sector, stock_news):
-                full_news += chunk
-                news_area.markdown(full_news + "▌")
-            news_area.markdown(full_news)
-
 
 # ─────────────────────────────────────────────────────────────────────────────
-# PAGE 6 — Industry Analysis
+# PAGE 5 — Sector Markets
 # ─────────────────────────────────────────────────────────────────────────────
-elif page == "🏭 Industry":
-    st.title("🏭 Industry Analysis")
-    st.caption("Competitive intelligence from sector peers with AI-powered macro analysis.")
+elif page == "🏭 Sector Markets":
+    st.title("🏭 Sector Markets")
+    st.caption("US equity sector performance and top companies — powered by Yahoo Finance.")
 
-    symbol = st.text_input("Focus ticker (your stock)", key="ind_ticker").strip().upper()
+    tab_perf, tab_detail = st.tabs(["Sector Performance", "Sector Detail"])
 
-    custom_peers_raw = st.text_input(
-        "Custom peers (optional, comma-separated)",
-        placeholder="e.g. MSFT, GOOGL, AMZN — leave empty to auto-detect top 5 sector peers",
-        key="ind_custom_peers",
-    )
-
-    if symbol and st.button("Load Industry News", type="primary"):
-        with st.spinner(f"Fetching {symbol}…"):
-            try:
-                info = fetch_stock(symbol)
-            except Exception as e:
-                st.error(str(e))
-                st.stop()
-
-        company_name = info.get("longName", symbol)
-        sector       = info.get("sector", "N/A")
-        industry     = info.get("industry", "N/A")
-
-        st.subheader(company_name)
-        st.caption(f"{sector} · {industry}")
-        st.divider()
-
-        custom_peers = [p.strip().upper() for p in custom_peers_raw.split(",") if p.strip()]
-
-        with st.spinner("Loading peer news…"):
-            if custom_peers:
-                industry_news, peers_used = fetch_peers_news_by_list(custom_peers)
-                st.caption(f"Using custom peers: **{', '.join(custom_peers)}**")
-            else:
-                industry_news, peers_used = fetch_sector_peers_news(sector, exclude_symbol=symbol)
-                default_peers = SECTOR_PEERS.get(sector, [])
-                if default_peers:
-                    peer_pool = ", ".join(p for p in default_peers if p.upper() != symbol)
-                    st.caption(f"**Auto peer pool ({sector}):** {peer_pool}")
-
-        if not industry_news:
-            st.info("No peer news available. Disable Demo Mode or enter custom peer tickers.")
+    with tab_perf:
+        if is_demo_mode():
+            st.info("Sector performance requires a live connection. Disable Demo Mode to load.")
         else:
-            if peers_used:
-                st.caption(f"Sources: **{', '.join(peers_used)}** · {len(industry_news)} articles")
-            for item in industry_news:
-                _render_news_item(item)
+            with st.spinner("Loading sector data…"):
+                sector_data = fetch_sector_performance()
 
-            st.subheader("AI Industry Analysis")
-            st.caption("Analyzing competitive dynamics across sector peers…")
-            ind_area = st.empty()
-            full_ind = ""
-            for chunk in analyze_industry_stream(sector, industry, company_name,
-                                                  industry_news, peers=peers_used):
-                full_ind += chunk
-                ind_area.markdown(full_ind + "▌")
-            ind_area.markdown(full_ind)
+            if not sector_data:
+                st.error("Could not load sector performance. Check your network connection.")
+            else:
+                df_s = pd.DataFrame(sector_data)
+
+                # Performance bar chart
+                bar_colors = ["#00C805" if (v or 0) >= 0 else "#FF3B3B" for v in df_s["1D %"]]
+                fig_sec = go.Figure(go.Bar(
+                    x=df_s["Sector"],
+                    y=[(v * 100 if v is not None else 0) for v in df_s["1D %"]],
+                    marker_color=bar_colors,
+                    text=[f"{v*100:+.2f}%" if v is not None else "N/A" for v in df_s["1D %"]],
+                    textposition="outside",
+                ))
+                fig_sec.update_layout(
+                    title="Sector 1-Day Performance (%)",
+                    yaxis_title="Change (%)",
+                    template="plotly_white",
+                    height=420,
+                    margin=dict(l=0, r=0, t=40, b=110),
+                    xaxis_tickangle=-30,
+                )
+                st.plotly_chart(fig_sec, use_container_width=True)
+
+                # Performance table
+                st.subheader("Performance Summary")
+                disp = df_s.copy()
+                disp["Price"] = disp["Price"].apply(lambda v: f"${v:.2f}" if v is not None else "N/A")
+                for col in ("1D %", "1W %", "1M %"):
+                    disp[col] = disp[col].apply(
+                        lambda v: f"{v*100:+.2f}%" if v is not None else "N/A"
+                    )
+                st.dataframe(disp, hide_index=True, use_container_width=True)
+
+    with tab_detail:
+        selected_sector = st.selectbox("Select a sector", list(SECTOR_ETF.keys()),
+                                       key="sector_detail_sel")
+        if st.button("Load Sector Detail", key="sector_detail_btn"):
+            if is_demo_mode():
+                st.info("Sector detail requires a live connection. Disable Demo Mode.")
+            else:
+                with st.spinner(f"Loading {selected_sector}…"):
+                    detail = fetch_sector_details(selected_sector)
+
+                if not detail:
+                    st.warning("Could not load sector details.")
+                else:
+                    st.caption(f"Benchmark ETF: **{SECTOR_ETF.get(selected_sector, '')}**")
+
+                    top_co = detail.get("top_companies")
+                    if top_co is not None and not top_co.empty:
+                        st.subheader("Top Companies")
+                        st.dataframe(top_co, use_container_width=True)
+
+                    industries = detail.get("industries")
+                    if industries is not None and not industries.empty:
+                        st.subheader("Sub-Industries")
+                        st.dataframe(industries, use_container_width=True)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -782,26 +740,13 @@ elif page == "⚖️ Compare":
         )
         st.plotly_chart(fig, use_container_width=True)
 
-        # AI comparison
-        st.subheader("AI Comparison Report")
-        report_area = st.empty()
-        full_text = ""
-
-        with st.spinner("Claude is comparing…"):
-            for chunk in compare_stocks_stream(infos):
-                full_text += chunk
-                report_area.markdown(full_text + "▌")
-
-        report_area.markdown(full_text)
-        st.success("Comparison complete.")
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # PAGE 8 — Technical Analysis
 # ─────────────────────────────────────────────────────────────────────────────
 elif page == "📈 Technical Analysis":
     st.title("📈 Technical Analysis")
-    st.caption("K-line · Volume · MA · Bollinger Bands · RSI · MACD · AI Trading Idea")
+    st.caption("K-line · Volume · MA · Bollinger Bands · RSI · MACD")
 
     symbol = st.text_input("Ticker symbol", key="ta_ticker").strip().upper()
     period = st.selectbox("Period", ["1mo", "3mo", "6mo", "1y", "2y"], index=3, key="ta_period")
@@ -979,14 +924,55 @@ elif page == "📈 Technical Analysis":
             )
             st.plotly_chart(fig_macd, use_container_width=True)
 
-        # ── AI Trading Idea ────────────────────────────────────────────────
-        st.subheader("AI Trading Idea")
-        st.caption("基于技术指标，仅供学习参考，不构成投资建议。")
 
-        idea_area = st.empty()
-        full_idea = ""
-        with st.spinner("Generating trading idea…"):
-            for chunk in analyze_technicals_stream(symbol, company_name, df, info):
-                full_idea += chunk
-                idea_area.markdown(full_idea + "▌")
-        idea_area.markdown(full_idea)
+# ─────────────────────────────────────────────────────────────────────────────
+# PAGE 8 — Prediction Markets
+# ─────────────────────────────────────────────────────────────────────────────
+elif page == "🎯 Prediction Markets":
+    st.title("🎯 Prediction Markets")
+    st.caption("Live prediction markets — sourced from Yahoo Finance.")
+
+    if is_demo_mode():
+        st.info("Prediction Markets requires a live connection. Disable Demo Mode to load.")
+    else:
+        with st.spinner("Fetching prediction markets from Yahoo Finance…"):
+            markets = fetch_prediction_markets()
+
+        if not markets:
+            st.info(
+                "Prediction market data could not be loaded automatically. "
+                "View them directly on Yahoo Finance:"
+            )
+            st.link_button(
+                "Open Yahoo Finance Prediction Markets",
+                "https://finance.yahoo.com/markets/prediction-markets/",
+            )
+        else:
+            st.success(f"{len(markets)} active markets loaded.")
+
+            rows = []
+            for q in markets:
+                price_raw = q.get("regularMarketPrice")
+                price     = price_raw.get("fmt") if isinstance(price_raw, dict) else price_raw
+
+                chg_raw   = q.get("regularMarketChangePercent")
+                chg       = chg_raw.get("fmt") if isinstance(chg_raw, dict) else (
+                    f"{chg_raw:+.2f}%" if isinstance(chg_raw, (int, float)) else chg_raw
+                )
+
+                vol_raw   = q.get("regularMarketVolume")
+                vol       = vol_raw.get("fmt") if isinstance(vol_raw, dict) else vol_raw
+
+                rows.append({
+                    "Symbol":   q.get("symbol", ""),
+                    "Name":     q.get("shortName") or q.get("longName") or q.get("displayName", ""),
+                    "Price":    price,
+                    "Change":   chg,
+                    "Volume":   vol,
+                })
+
+            st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+            st.link_button(
+                "View on Yahoo Finance",
+                "https://finance.yahoo.com/markets/prediction-markets/",
+            )

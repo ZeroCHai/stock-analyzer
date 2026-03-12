@@ -238,3 +238,116 @@ def fetch_sector_peers_news(
     candidates = [p for p in SECTOR_PEERS.get(sector, [])
                   if p.upper() != exclude_symbol.upper()]
     return fetch_peers_news_by_list(candidates[:5], max_per_ticker, max_total)
+
+
+# ── Sector Markets ─────────────────────────────────────────────────────────────
+
+# Maps SECTOR_ETF display names to yfinance Sector API keys
+SECTOR_YF_KEY: dict[str, str] = {
+    "Technology":             "technology",
+    "Healthcare":             "healthcare",
+    "Financials":             "financial-services",
+    "Consumer Discretionary": "consumer-cyclical",
+    "Consumer Staples":       "consumer-defensive",
+    "Energy":                 "energy",
+    "Utilities":              "utilities",
+    "Basic Materials":        "basic-materials",
+    "Industrials":            "industrials",
+    "Real Estate":            "real-estate",
+    "Communication Services": "communication-services",
+}
+
+
+def fetch_sector_performance() -> list[dict]:
+    """
+    Fetch 1-day, 1-week, and 1-month price performance for all 11 SPDR sector ETFs.
+    Returns a list of dicts sorted by 1-day change (descending).
+    """
+    results = []
+    for sector_name, etf_sym in SECTOR_ETF.items():
+        try:
+            hist = yf.Ticker(etf_sym).history(period="1mo")
+            if hist.empty:
+                continue
+            price  = float(hist["Close"].iloc[-1])
+            chg_1d = float(hist["Close"].iloc[-1] / hist["Close"].iloc[-2] - 1) if len(hist) >= 2  else None
+            chg_1w = float(hist["Close"].iloc[-1] / hist["Close"].iloc[-6] - 1) if len(hist) >= 6  else None
+            chg_1m = float(hist["Close"].iloc[-1] / hist["Close"].iloc[0]  - 1) if len(hist) >= 15 else None
+            results.append({
+                "Sector": sector_name,
+                "ETF":    etf_sym,
+                "Price":  price,
+                "1D %":   chg_1d,
+                "1W %":   chg_1w,
+                "1M %":   chg_1m,
+            })
+        except Exception:
+            pass
+    results.sort(key=lambda x: (x.get("1D %") or -999), reverse=True)
+    return results
+
+
+def fetch_sector_details(sector_name: str) -> dict:
+    """
+    Fetch top companies and sub-industries for a sector via yf.Sector().
+    Returns {"top_companies": DataFrame, "industries": DataFrame} or {} on failure.
+    """
+    key = SECTOR_YF_KEY.get(sector_name, "")
+    if not key:
+        return {}
+    try:
+        s = yf.Sector(key)
+        return {
+            "top_companies": getattr(s, "top_companies", pd.DataFrame()),
+            "industries":    getattr(s, "industries",    pd.DataFrame()),
+        }
+    except Exception:
+        return {}
+
+
+# ── Prediction Markets ─────────────────────────────────────────────────────────
+
+def fetch_prediction_markets() -> list[dict]:
+    """
+    Fetch prediction market quotes from Yahoo Finance.
+    Returns a list of quote dicts on success, or an empty list on failure.
+    """
+    import requests
+
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
+        ),
+        "Accept": "application/json",
+        "Referer": "https://finance.yahoo.com/markets/prediction-markets/",
+    }
+
+    endpoints = [
+        "https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved",
+        "https://query2.finance.yahoo.com/v1/finance/screener/predefined/saved",
+    ]
+    params = {
+        "scrIds":  "predmarket_most_active",
+        "count":   "50",
+        "lang":    "en-US",
+        "region":  "US",
+    }
+
+    for url in endpoints:
+        try:
+            resp = requests.get(url, params=params, headers=headers, timeout=12)
+            if not resp.ok:
+                continue
+            data   = resp.json()
+            quotes = (
+                data.get("finance", {})
+                    .get("result", [{}])[0]
+                    .get("quotes", [])
+            )
+            if quotes:
+                return quotes
+        except Exception:
+            continue
+
+    return []
