@@ -305,6 +305,57 @@ def fetch_sector_details(sector_name: str) -> dict:
         return {}
 
 
+# ── Global Market Indices ──────────────────────────────────────────────────────
+
+MARKET_INDICES: list[dict] = [
+    {"symbol": "^GSPC",     "name": "S&P 500",        "region": "Americas"},
+    {"symbol": "^NDX",      "name": "NASDAQ 100",      "region": "Americas"},
+    {"symbol": "^DJI",      "name": "Dow Jones",       "region": "Americas"},
+    {"symbol": "^RUT",      "name": "Russell 2000",    "region": "Americas"},
+    {"symbol": "^FTSE",     "name": "FTSE 100",        "region": "Europe"},
+    {"symbol": "^GDAXI",    "name": "DAX",             "region": "Europe"},
+    {"symbol": "^FCHI",     "name": "CAC 40",          "region": "Europe"},
+    {"symbol": "^STOXX50E", "name": "EURO STOXX 50",   "region": "Europe"},
+    {"symbol": "^N225",     "name": "Nikkei 225",      "region": "Asia-Pacific"},
+    {"symbol": "^HSI",      "name": "Hang Seng",       "region": "Asia-Pacific"},
+    {"symbol": "000001.SS", "name": "Shanghai Comp",   "region": "Asia-Pacific"},
+    {"symbol": "000300.SS", "name": "CSI 300",         "region": "Asia-Pacific"},
+    {"symbol": "^AXJO",     "name": "ASX 200",         "region": "Asia-Pacific"},
+    {"symbol": "GC=F",      "name": "Gold",            "region": "Commodities"},
+    {"symbol": "CL=F",      "name": "Crude Oil (WTI)", "region": "Commodities"},
+    {"symbol": "DX-Y.NYB",  "name": "USD Index",       "region": "Commodities"},
+    {"symbol": "^VIX",      "name": "VIX",             "region": "Volatility"},
+]
+
+
+def fetch_market_indices() -> list[dict]:
+    """
+    Fetch current price and 1D/1W change for global market indices.
+    Returns a list of dicts with keys: symbol, name, region, price, chg_1d, chg_1w.
+    """
+    results = []
+    for idx in MARKET_INDICES:
+        sym = idx["symbol"]
+        try:
+            hist = yf.Ticker(sym).history(period="5d")
+            if hist.empty:
+                continue
+            price  = float(hist["Close"].iloc[-1])
+            chg_1d = float(hist["Close"].iloc[-1] / hist["Close"].iloc[-2] - 1) if len(hist) >= 2 else None
+            chg_1w = float(hist["Close"].iloc[-1] / hist["Close"].iloc[0]  - 1) if len(hist) >= 5 else None
+            results.append({
+                "symbol": sym,
+                "name":   idx["name"],
+                "region": idx["region"],
+                "price":  price,
+                "chg_1d": chg_1d,
+                "chg_1w": chg_1w,
+            })
+        except Exception:
+            pass
+    return results
+
+
 # ── Prediction Markets ─────────────────────────────────────────────────────────
 
 def fetch_prediction_markets() -> list[dict]:
