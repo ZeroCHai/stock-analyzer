@@ -174,12 +174,17 @@ st.markdown(
 )
 
 # ── Sidebar header ────────────────────────────────────────────────────────────
-st.sidebar.markdown(
-    "<h2 style='margin:0 0 0.1rem 0; font-size:1.4rem; font-weight:800;"
-    " letter-spacing:-0.01em;'>📈 Stock Analyzer</h2>",
-    unsafe_allow_html=True,
-)
-st.sidebar.caption("US equity research · powered by AI")
+_logo_path = os.path.join(os.path.dirname(__file__), "logo.png")
+_logo_col, _title_col = st.sidebar.columns([1, 2.6], gap="small")
+with _logo_col:
+    st.image(_logo_path, width=64)
+with _title_col:
+    st.markdown(
+        "<div style='padding-top:6px'>"
+        "<span style='font-size:1.25rem;font-weight:800;letter-spacing:-0.01em;"
+        "line-height:1.15'>Stock<br>Analyzer</span></div>",
+        unsafe_allow_html=True,
+    )
 
 # ── Demo mode toggle (sidebar) ────────────────────────────────────────────────
 st.sidebar.divider()
